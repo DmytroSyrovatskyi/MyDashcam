@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#000000</color>
+    <color name="white">#FFFFFF</color>
+    <color name="ui_background">#121212</color>
+    <color name="ui_surface">#1E1E1E</color>
+    <color name="ui_tab_row">#111111</color>
+    <color name="accent_record_on">#D32F2F</color>
+    <color name="accent_record_off">#2E7D32</color>
+    <color name="accent_lock">#1565C0</color>
+    <color name="text_active">#FFFFFF</color>
+    <color name="text_inactive">#AAAAAA</color>
+    <color name="tab_bg_active">#2C2C2C</color>
+</resources>

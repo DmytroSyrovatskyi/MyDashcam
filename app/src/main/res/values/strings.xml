@@ -1,0 +1,45 @@
+<resources>
+    <string name="app_name">My Dashcam</string>
+
+    <string name="tab_temp">TIMELINE</string>
+    <string name="tab_saved">PROTECTED</string>
+
+    <string name="status_waiting">WAITING</string>
+    <string name="status_recording">RECORDING ACTIVE</string>
+
+    <string name="desc_settings">Settings</string>
+    <string name="desc_toggle_record">Start or Stop recording</string>
+    <string name="desc_lock_file">Protect current video</string>
+
+    <string name="msg_locked">File protected!</string>
+    <string name="msg_unlocked">Protection removed</string>
+    <string name="msg_deleted">File deleted</string>
+    <string name="dialog_delete_title">Delete Video</string>
+    <string name="dialog_delete_msg">Are you sure you want to remove this file?</string>
+
+    <string name="btn_delete">DELETE</string>
+    <string name="btn_cancel">@android:string/cancel</string>
+    <string name="btn_save_config">SAVE CONFIG</string>
+    <string name="settings_title">Application Settings</string>
+
+    <string name="video_time_range">%1$s — %2$s</string>
+    <string name="video_info_format">%1$d min • %2$s</string>
+
+    <string name="notif_title_recording">RECORDING ACTIVE</string>
+    <string name="notif_title_standby">STANDBY</string>
+    <string name="notif_body_ready">Dashcam Ready — Tap START to begin</string>
+    <string name="notif_stats_format">[%1$s • %2$s • %3$dfps] ISO: %4$d | NEXT: %5$dMbps</string>
+
+    <string name="btn_start">START</string>
+    <string name="btn_stop">STOP</string>
+    <string name="btn_lock">LOCK</string>
+    <string name="btn_exit">EXIT</string>
+
+    <string name="cam_front">FRONT</string>
+    <string name="cam_main">MAIN</string>
+    <string name="cam_wide">WIDE</string>
+
+    <string name="toast_perms_needed">Please open the app first and grant permissions!</string>
+    <string name="toast_recording_stopped">⏹ STOPPED</string>
+    <string name="toast_recording_started">▶ RECORDING STARTED!</string>
+</resources>

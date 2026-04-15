@@ -1,0 +1,45 @@
+<resources>
+    <string name="app_name">Мой Регистратор</string>
+
+    <string name="tab_temp">ХРОНИКА</string>
+    <string name="tab_saved">ЗАЩИЩЕНО</string>
+
+    <string name="status_waiting">ОЖИДАНИЕ</string>
+    <string name="status_recording">ИДЕТ ЗАПИСЬ</string>
+
+    <string name="desc_settings">Настройки</string>
+    <string name="desc_toggle_record">Старт или Стоп</string>
+    <string name="desc_lock_file">Защитить файл</string>
+
+    <string name="msg_locked">Файл защищен!</string>
+    <string name="msg_unlocked">Защита снята</string>
+    <string name="msg_deleted">Файл удален</string>
+    <string name="dialog_delete_title">Удаление</string>
+    <string name="dialog_delete_msg">Вы уверены, что хотите удалить этот файл?</string>
+
+    <string name="btn_delete">УДАЛИТЬ</string>
+    <string name="btn_cancel">@android:string/cancel</string>
+    <string name="btn_save_config">СОХРАНИТЬ</string>
+    <string name="settings_title">Настройки приложения</string>
+
+    <string name="video_time_range">%1$s — %2$s</string>
+    <string name="video_info_format">%1$d мин • %2$s</string>
+
+    <string name="notif_title_recording">ЗАПИСЬ ИДЕТ</string>
+    <string name="notif_title_standby">ОЖИДАНИЕ</string>
+    <string name="notif_body_ready">Система готова — Нажмите СТАРТ</string>
+    <string name="notif_stats_format">[%1$s • %2$s • %3$dfps] ISO: %4$d | СЛЕД: %5$d Мбит/с</string>
+
+    <string name="btn_start">СТАРТ</string>
+    <string name="btn_stop">СТОП</string>
+    <string name="btn_lock">БЛОК.</string>
+    <string name="btn_exit">ВЫХОД</string>
+
+    <string name="cam_front">САЛОН</string>
+    <string name="cam_main">ОСНОВНАЯ</string>
+    <string name="cam_wide">ШИРИК</string>
+
+    <string name="toast_perms_needed">Сначала откройте приложение и дайте права!</string>
+    <string name="toast_recording_stopped">⏹ ОСТАНОВЛЕНО</string>
+    <string name="toast_recording_started">▶ ЗАПИСЬ ПОШЛА!</string>
+</resources>

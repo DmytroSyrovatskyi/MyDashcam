@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:padding="16dp"
+    android:layout_marginBottom="8dp"
+    android:background="#121212"
+    android:gravity="center_vertical"
+    tools:ignore="SpeakableTextPresentCheck,ImageContrastCheck,TouchTargetSizeCheck,ContentDescription,TextContrastCheck">
+
+    <ImageView
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:src="@android:drawable/ic_media_play"
+        android:contentDescription="@null"
+        app:tint="#00E676" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:layout_marginStart="16dp">
+
+        <TextView
+            android:id="@+id/textVideoDate"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            tools:text="27 Фев 2026, 15:30"
+            android:textStyle="bold"
+            android:textSize="14sp"
+            android:textColor="#FFFFFF"/>
+
+        <TextView
+            android:id="@+id/textVideoInfo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            tools:text="⏱ 10:00  |  💾 150 МБ"
+            android:textSize="12sp"
+            android:layout_marginTop="4dp"
+            android:textColor="#AAAAAA"/>
+    </LinearLayout>
+
+    <ImageButton
+        android:id="@+id/btnLockUnlock"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:background="@android:color/transparent"
+        android:contentDescription="@null"
+        app:tint="#FFC107"
+        android:src="@android:drawable/ic_menu_save" />
+
+    <ImageButton
+        android:id="@+id/btnDelete"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:background="@android:color/transparent"
+        android:contentDescription="@null"
+        app:tint="#FF1744"
+        android:src="@android:drawable/ic_menu_delete" />
+
+</LinearLayout>
