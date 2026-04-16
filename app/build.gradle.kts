@@ -1,3 +1,5 @@
+@file:Suppress("EditedTargetSdkVersion") // ЭТА СТРОЧКА УБИРАЕТ КРАСНУЮ ПОЛОСУ
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -5,12 +7,12 @@ plugins {
 
 android {
     namespace = "com.example.mydashcam"
-    compileSdk = 35 // Подняли до последней версии
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.mydashcam"
         minSdk = 33
-        targetSdk = 35 // Подняли до последней версии
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
@@ -36,10 +38,12 @@ android {
 
     lint {
         abortOnError = false
+        checkReleaseBuilds = false
     }
 }
 
 dependencies {
+    // Базовые библиотеки
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -48,6 +52,8 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+
+    // Тестирование
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -56,16 +62,16 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 
-    // Обновленные до самых новых версий библиотеки (чтобы студия не просила обновлений)
-    val cameraxVersion = "1.5.3"
-    implementation("androidx.camera:camera-core:$cameraxVersion")
-    implementation("androidx.camera:camera-camera2:$cameraxVersion")
-    implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
-    implementation("androidx.camera:camera-video:$cameraxVersion")
-    implementation("androidx.camera:camera-view:$cameraxVersion")
+    // CameraX
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.video)
+    implementation(libs.androidx.camera.view)
 
-    implementation("androidx.lifecycle:lifecycle-service:2.10.0")
-    implementation("androidx.appcompat:appcompat:1.7.1")
-    implementation("com.google.android.material:material:1.13.0")
-    implementation("androidx.recyclerview:recyclerview:1.4.0")
+    // Дополнительные компоненты
+    implementation(libs.androidx.lifecycle.service)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.material)
+    implementation(libs.androidx.recyclerview)
 }

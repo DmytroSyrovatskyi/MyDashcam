@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.*
 import android.content.*
 import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
 import android.hardware.camera2.*
 import android.media.*
 import android.net.Uri
@@ -15,11 +16,13 @@ import android.view.OrientationEventListener
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.*
 import androidx.camera.core.*
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.createBitmap
 import androidx.lifecycle.*
 import kotlinx.coroutines.*
 import java.text.SimpleDateFormat
@@ -40,6 +43,7 @@ class CameraService : LifecycleService() {
     private var currentVideoUri: Uri? = null
     private var currentVideoName: String? = null
     private var powerManager: PowerManager? = null
+    // Возвращаем правильный тип слушателя
     private var thermalListener: PowerManager.OnThermalStatusChangedListener? = null
     private var isThermalDowngradeActive = false
     private var orientationEventListener: OrientationEventListener? = null
@@ -54,6 +58,22 @@ class CameraService : LifecycleService() {
     private var prefResolution = "1080"
     private var prefFps = 30
 
+    private var previewCallback: ((Bitmap, Int) -> Unit)? = null
+    private var reusableBitmap: Bitmap? = null
+    private val binder = LocalBinder()
+
+    inner class LocalBinder : Binder() {
+        fun setPreviewListener(listener: ((Bitmap, Int) -> Unit)?) {
+            previewCallback = listener
+        }
+        fun isFrontCamera(): Boolean = prefCameraType == "front"
+    }
+
+    override fun onBind(intent: Intent): IBinder {
+        super.onBind(intent)
+        return binder
+    }
+
     companion object {
         var isRecordingActive = false
         const val ACTION_START = "ACTION_START"
@@ -61,7 +81,8 @@ class CameraService : LifecycleService() {
         const val ACTION_EXIT = "ACTION_EXIT"
         const val ACTION_LOCK = "ACTION_LOCK"
         const val ACTION_STANDBY = "ACTION_STANDBY"
-        const val RECORDING_DURATION_MS = 600000L // 10 минут
+        const val ACTION_PAUSE_PREVIEW = "ACTION_PAUSE_PREVIEW"
+        const val RECORDING_DURATION_MS = 600000L
     }
 
     override fun onCreate() {
@@ -77,7 +98,8 @@ class CameraService : LifecycleService() {
     }
 
     private fun setupThermalListener() {
-        thermalListener = PowerManager.OnThermalStatusChangedListener { status ->
+        // Убрали проверку SDK_INT, так как проект >= 33
+        val listener = PowerManager.OnThermalStatusChangedListener { status ->
             isThermalDowngradeActive = status >= PowerManager.THERMAL_STATUS_SEVERE
             if (status >= PowerManager.THERMAL_STATUS_CRITICAL && isRecordingActive) {
                 stopHardware()
@@ -85,7 +107,8 @@ class CameraService : LifecycleService() {
                 updateNotification()
             }
         }
-        powerManager?.addThermalStatusListener(thermalListener!!)
+        thermalListener = listener
+        powerManager?.addThermalStatusListener(listener)
     }
 
     private fun setupOrientationListener() {
@@ -105,6 +128,9 @@ class CameraService : LifecycleService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
+
+        updateNotification()
+
         when (intent?.action) {
             ACTION_START -> if (!isRecordingActive) {
                 isRecordingActive = true
@@ -120,6 +146,7 @@ class CameraService : LifecycleService() {
                 playStopSound()
                 stopHardware()
                 updateNotification()
+                startHardware(isRecording = false)
             }
             ACTION_LOCK -> executeLock()
             ACTION_EXIT -> {
@@ -133,10 +160,23 @@ class CameraService : LifecycleService() {
                 return START_NOT_STICKY
             }
             ACTION_STANDBY -> {
-                // Только обновляем шторку
+                if (!isRecordingActive) {
+                    val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
+                    prefCameraType = prefs.getString("pref_camera", "auto") ?: "auto"
+                    prefResolution = prefs.getString("pref_resolution", "1080") ?: "1080"
+                    prefFps = prefs.getInt("pref_fps", 30)
+                    startHardware(isRecording = false)
+                }
+            }
+            ACTION_PAUSE_PREVIEW -> {
+                if (!isRecordingActive) {
+                    try { cameraProvider?.unbindAll() } catch(_: Exception) {}
+                    cameraControl = null
+                    cameraInfo = null
+                    updateNotification()
+                }
             }
         }
-        updateNotification()
         return START_STICKY
     }
 
@@ -215,14 +255,13 @@ class CameraService : LifecycleService() {
         }
     }
 
-    // Воспроизведение звука принудительно через встроенный динамик телефона
     private fun playStartSound() {
         try {
             val mp = MediaPlayer.create(this, R.raw.s25_ultra_notification)
             val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
             val speakers = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
             speakers.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }?.let { speaker ->
-                mp.setPreferredDevice(speaker) // Игнорируем Bluetooth для вывода звука
+                mp.setPreferredDevice(speaker)
             }
             mp.start()
             mp.setOnCompletionListener { it.release() }
@@ -269,7 +308,7 @@ class CameraService : LifecycleService() {
     private fun startHardwareLoop() {
         if (!isRecordingActive) return
         manageStorageSpace()
-        startHardware()
+        startHardware(isRecording = true)
         startDynamicUpdates()
         updateNotification()
         loopJob?.cancel()
@@ -283,17 +322,62 @@ class CameraService : LifecycleService() {
     }
 
     @SuppressLint("MissingPermission")
-    private fun startHardware() {
+    private fun startHardware(isRecording: Boolean) {
         try {
-            currentVideoName = "BVR_PRO_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(System.currentTimeMillis())}.mp4"
-            currentVideoUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
-                put(MediaStore.Video.Media.DISPLAY_NAME, currentVideoName)
-                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/MyDashcam")
-            })
-            pfd = currentVideoUri?.let { contentResolver.openFileDescriptor(it, "rw") } ?: return
+            cameraProvider?.unbindAll()
 
             val w = if(prefResolution == "4k") 3840 else if(prefResolution == "720") 1280 else 1920
             val h = if(prefResolution == "4k") 2160 else if(prefResolution == "720") 720 else 1080
+
+            if (isRecording) {
+                currentVideoName = "BVR_PRO_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(System.currentTimeMillis())}.mp4"
+                currentVideoUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
+                    put(MediaStore.Video.Media.DISPLAY_NAME, currentVideoName)
+                    put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/MyDashcam")
+                })
+                pfd = currentVideoUri?.let { contentResolver.openFileDescriptor(it, "rw") } ?: return
+
+                mediaRecorder = MediaRecorder(this).apply {
+                    setAudioSource(MediaRecorder.AudioSource.MIC)
+                    setVideoSource(MediaRecorder.VideoSource.SURFACE)
+                    setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+
+                    setVideoEncoder(MediaRecorder.VideoEncoder.HEVC)
+                    setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+
+                    setVideoEncodingBitRate(nextTargetBitrate)
+                    setVideoFrameRate(prefFps)
+                    setVideoSize(w, h)
+
+                    setAudioChannels(1)
+                    setAudioSamplingRate(48000)
+                    setAudioEncodingBitRate(128000)
+
+                    setOutputFile(pfd!!.fileDescriptor)
+
+                    val mics = (getSystemService(AUDIO_SERVICE) as AudioManager).getDevices(AudioManager.GET_DEVICES_INPUTS)
+                    mics.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }?.let { setPreferredDevice(it) }
+
+                    try { prepare() } catch(_: Exception) {
+                        reset()
+                        setAudioSource(MediaRecorder.AudioSource.MIC)
+                        setVideoSource(MediaRecorder.VideoSource.SURFACE)
+                        setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                        setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+                        setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                        setVideoEncodingBitRate(nextTargetBitrate)
+                        setVideoFrameRate(prefFps)
+                        setVideoSize(w, h)
+                        setAudioChannels(1)
+                        setAudioSamplingRate(48000)
+                        setAudioEncodingBitRate(128000)
+                        setOutputFile(pfd!!.fileDescriptor)
+                        val micsFallback = (getSystemService(AUDIO_SERVICE) as AudioManager).getDevices(AudioManager.GET_DEVICES_INPUTS)
+                        micsFallback.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }?.let { setPreferredDevice(it) }
+                        prepare()
+                    }
+                }
+            }
 
             ProcessCameraProvider.getInstance(this).addListener({
                 val provider = ProcessCameraProvider.getInstance(this).get()
@@ -308,95 +392,74 @@ class CameraService : LifecycleService() {
                 val sensorOri = Camera2CameraInfo.from(target!!).getCameraCharacteristic(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
                 val rot = (sensorOri + (if (target.lensFacing == CameraSelector.LENS_FACING_FRONT) -deviceOrientationAngle else deviceOrientationAngle) + 360) % 360
 
-                // Ищем встроенный микрофон телефона, чтобы переопределить настройки
-                val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
-                val mics = audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
-                val builtInMic = mics.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
+                var recordPreview: Preview? = null
+                if (isRecording && mediaRecorder != null) {
+                    mediaRecorder?.setOrientationHint(rot)
+                    val selector = ResolutionSelector.Builder()
+                        .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+                        .setResolutionStrategy(ResolutionStrategy(Size(w, h), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
+                        .build()
+                    val recordPreviewBuilder = Preview.Builder().setResolutionSelector(selector)
+                    val extender = Camera2Interop.Extender(recordPreviewBuilder)
 
-                mediaRecorder = MediaRecorder(this).apply {
-                    setAudioSource(MediaRecorder.AudioSource.MIC)
-                    setVideoSource(MediaRecorder.VideoSource.SURFACE)
-                    setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                    extender.setSessionCaptureCallback(object : CameraCaptureSession.CaptureCallback() {
+                        override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                            result.get(CaptureResult.SENSOR_SENSITIVITY)?.let { iso ->
+                                isoEma = (iso * 0.15f) + (isoEma * 0.85f)
+                            }
+                        }
+                    })
 
-                    setVideoEncoder(MediaRecorder.VideoEncoder.HEVC)
-                    setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                    val ranges = Camera2CameraInfo.from(target).getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+                    val bestRange = ranges?.firstOrNull { it.upper == prefFps && it.lower == prefFps } ?: ranges?.firstOrNull { it.upper == prefFps } ?: Range(30, 30)
 
-                    setVideoEncodingBitRate(nextTargetBitrate)
-                    setVideoFrameRate(prefFps)
-                    setVideoSize(w, h)
+                    extender.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, bestRange)
+                    extender.setCaptureRequestOption(CaptureRequest.CONTROL_CAPTURE_INTENT, CaptureRequest.CONTROL_CAPTURE_INTENT_VIDEO_RECORD)
 
-                    // Жесткая настройка студийного аудио
-                    setAudioChannels(1)
-                    setAudioSamplingRate(48000)
-                    setAudioEncodingBitRate(128000)
-
-                    setOutputFile(pfd!!.fileDescriptor)
-                    setOrientationHint(rot)
-
-                    // Переопределяем запись строго на микрофон телефона
-                    builtInMic?.let { setPreferredDevice(it) }
-
-                    try { prepare() } catch(_: Exception) {
-                        reset()
-                        setAudioSource(MediaRecorder.AudioSource.MIC)
-                        setVideoSource(MediaRecorder.VideoSource.SURFACE)
-                        setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                        setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-                        setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-
-                        setVideoEncodingBitRate(nextTargetBitrate)
-                        setVideoFrameRate(prefFps)
-                        setVideoSize(w, h)
-
-                        setAudioChannels(1)
-                        setAudioSamplingRate(48000)
-                        setAudioEncodingBitRate(128000)
-
-                        setOutputFile(pfd!!.fileDescriptor)
-                        setOrientationHint(rot)
-
-                        builtInMic?.let { setPreferredDevice(it) }
-                        prepare()
+                    recordPreview = recordPreviewBuilder.build()
+                    recordPreview.setSurfaceProvider(ContextCompat.getMainExecutor(this)) { request ->
+                        request.provideSurface(mediaRecorder!!.surface, ContextCompat.getMainExecutor(this)) {}
                     }
                 }
 
-                val selector = ResolutionSelector.Builder()
-                    .setResolutionStrategy(ResolutionStrategy(Size(w, h), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
+                val analysisSelector = ResolutionSelector.Builder()
+                    .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+                    .setResolutionStrategy(ResolutionStrategy(Size(1920, 1080), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
+                    .build()
+                val imageAnalysis = ImageAnalysis.Builder()
+                    .setResolutionSelector(analysisSelector)
+                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
 
-                val previewBuilder = Preview.Builder().setResolutionSelector(selector)
-                val extender = Camera2Interop.Extender(previewBuilder)
-
-                extender.setSessionCaptureCallback(object : CameraCaptureSession.CaptureCallback() {
-                    override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-                        result.get(CaptureResult.SENSOR_SENSITIVITY)?.let { iso ->
-                            isoEma = (iso * 0.15f) + (isoEma * 0.85f)
+                imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(this)) { imageProxy ->
+                    if (previewCallback != null) {
+                        if (reusableBitmap == null || reusableBitmap!!.width != imageProxy.width || reusableBitmap!!.height != imageProxy.height) {
+                            reusableBitmap = createBitmap(imageProxy.width, imageProxy.height)
                         }
+                        imageProxy.planes[0].buffer.rewind()
+                        reusableBitmap!!.copyPixelsFromBuffer(imageProxy.planes[0].buffer)
+                        previewCallback?.invoke(reusableBitmap!!, imageProxy.imageInfo.rotationDegrees)
                     }
-                })
-
-                val ranges = Camera2CameraInfo.from(target).getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
-                val bestRange = ranges?.firstOrNull { it.upper == prefFps && it.lower == prefFps } ?: ranges?.firstOrNull { it.upper == prefFps } ?: Range(30, 30)
-
-                extender.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, bestRange)
-                extender.setCaptureRequestOption(CaptureRequest.CONTROL_CAPTURE_INTENT, CaptureRequest.CONTROL_CAPTURE_INTENT_VIDEO_RECORD)
-
-                val preview = previewBuilder.build()
-                preview.setSurfaceProvider(ContextCompat.getMainExecutor(this)) { request ->
-                    request.provideSurface(mediaRecorder!!.surface, ContextCompat.getMainExecutor(this)) {}
+                    imageProxy.close()
                 }
 
                 try {
                     provider.unbindAll()
-                    val cam = provider.bindToLifecycle(this, CameraSelector.Builder().addCameraFilter { _ -> listOf(target) }.build(), preview)
+
+                    val useCases = mutableListOf<UseCase>(imageAnalysis)
+                    if (isRecording && recordPreview != null) {
+                        useCases.add(recordPreview)
+                    }
+
+                    val cam = provider.bindToLifecycle(this, CameraSelector.Builder().addCameraFilter { _ -> listOf(target) }.build(), *useCases.toTypedArray())
                     cameraControl = cam.cameraControl
                     cameraInfo = cam.cameraInfo
-                    Camera2CameraInfo.from(cameraInfo!!).getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)?.let {
-                        minHardwareIso = it.lower.toFloat()
-                        maxHardwareIso = minOf(it.upper.toFloat(), 3200f)
+
+                    if (isRecording) {
+                        mediaRecorder?.start()
+                        playStartSound()
                     }
-                    mediaRecorder?.start()
-                    playStartSound()
                 } catch (_: Exception) {}
             }, ContextCompat.getMainExecutor(this))
         } catch (_: Exception) {}
@@ -407,18 +470,19 @@ class CameraService : LifecycleService() {
         dynamicUpdateJob?.cancel()
         cameraControl = null
         cameraInfo = null
-        try { cameraProvider?.unbindAll() } catch(_:Exception){}
-        try { mediaRecorder?.stop() } catch(_:Exception) { currentVideoUri?.let { contentResolver.delete(it, null, null) } }
+        try { mediaRecorder?.stop() } catch(_: Exception) {}
         finally {
-            try { mediaRecorder?.release() } catch(_:Exception){}
+            try { mediaRecorder?.release() } catch(_: Exception) {}
             mediaRecorder = null
-            try { pfd?.close() } catch(_:Exception){}
+            try { pfd?.close() } catch(_: Exception) {}
             pfd = null
+            try { cameraProvider?.unbindAll() } catch(_: Exception) {}
         }
     }
 
     override fun onDestroy() {
         orientationEventListener?.disable()
+        // Убрали проверку SDK_INT
         thermalListener?.let { powerManager?.removeThermalStatusListener(it) }
         isRecordingActive = false
         stopHardware()

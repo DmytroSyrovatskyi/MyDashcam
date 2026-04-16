@@ -1,58 +1,30 @@
-# 🏎️ MyDashcam (BVR Pro)
+# REC Dashcam 🚗📹
 
-![Android](https://img.shields.io/badge/Android-10%20to%2014%2B-3DDC84?style=flat-square&logo=android)
-![Kotlin](https://img.shields.io/badge/Kotlin-100%25-7F52FF?style=flat-square&logo=kotlin)
-![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)
+A smart, lightweight, and fully autonomous dashcam application for Android. Turn your old or current smartphone into a professional digital video recorder (DVR) for your car.
 
-A professional Background Video Recorder (BVR) for Android. Designed with a focus on background stability, smart adaptation to shooting conditions, and minimal resource consumption.
+## ✨ Key Features
 
-Works flawlessly alongside navigation apps (Google Maps, Waze) or while the device screen is locked.
+* **Background Recording:** Records video seamlessly in the background. You can minimize the app, use GPS navigation, or turn off the screen — the recording won't stop.
+* **Live Viewfinder (Preview):** A dedicated "PREVIEW" tab allows you to align and calibrate your camera's angle in crisp 1080p *before* you hit record, without wasting storage space.
+* **Smart Loop Management:** Automatically deletes old videos when the storage limit is reached, ensuring you never run out of space.
+* **File Protection:** Lock crucial videos (e.g., accidents or interesting moments) with a single tap so they won't be overwritten by the loop manager.
+* **Thermal Protection:** Automatically monitors the device's temperature. It dynamically lowers the bitrate to prevent overheating and safely stops recording if the battery reaches critical temperatures.
+* **Dynamic Bitrate & Auto Exposure:** Adapts to lighting conditions in real-time, pulling details out of dark shadows during night drives.
+* **Modern UI:** Clean 3-tab layout (Timeline, Protected, Preview) with a floating control panel.
 
----
+## ⚙️ Requirements
+* **Minimum SDK:** Android 13 (API 33)
+* **Target SDK:** Android 14+ (API 34/35) fully supported (with proper Foreground Service permissions).
 
-## ✨ Key Features (Smart Capabilities)
-
-* 🎥 **True Background Recording:** Full support for Android 14 (API 34+). The service runs smoothly using the proper `ForegroundServiceTypes` (camera | microphone) without crashes.
-* 🧠 **Adaptive Shooting (Smart IQ):**
-    * *Dynamic Exposure (EV):* Continuously analyzes sensor ISO to prevent overexposure from oncoming headlights or when exiting tunnels.
-    * *Smart Bitrate:* Automatically recalculates the bitrate in low-light conditions to avoid pixelated or "blocky" video output.
-* 🔥 **Thermal Throttling Protection:** Deep integration with Android `PowerManager`. If the phone overheats under the windshield, the dashcam will gracefully reduce the processing load or safely stop recording to preserve the video file.
-* 🔄 **Loop Recording:** Records in 10-minute chunks. Once the storage limit is reached, older files are automatically overwritten to free up space.
-* 🔒 **Overwrite Protection:** Files can be "locked" directly from the notification panel (adding a `LOCKED_` prefix), protecting them from loop deletion.
-* ⚡ **Dual Launch Modes (App Shortcuts):**
-    * **Main App:** A full-fledged UI for viewing the gallery, managing/locking files, and adjusting advanced settings.
-    * **Quick Start:** A separate home screen icon acting as a remote control. A single tap seamlessly starts or stops recording without opening any visible windows.
-
----
+## 🚀 How to Use
+1. Mount your phone on your car's windshield.
+2. Open the app and use the **PREVIEW** tab to adjust the camera angle.
+3. Select your preferred camera (Wide, Main, or Front), Resolution, and FPS in the settings.
+4. Tap the **Green Play Button** to start recording. The app can now be minimized.
+5. Tap the **Lock** button during an emergency to secure the current loop file.
 
 ## 🛠 Tech Stack
-
-* **CameraX & Camera2Interop:** For direct hardware access and advanced sensor control (Lens selection: Main, Ultra-Wide, Front Cabin).
-* **Coroutines / LifecycleScope:** For asynchronous tracking of loop timers and adaptive bitrate recalculation every 150 ms.
-* **MediaRecorder (HEVC/H.264):** Optimized video compression with configurable resolutions up to 4K UHD and 60 FPS.
-* **Scoped Storage:** Records directly to the `Movies/MyDashcam` directory. The app relies on modern storage APIs and does not require invasive permissions to read the user's entire gallery.
-
----
-
-## 📱 Interface and Controls
-
-### Interactive Notification Panel
-You don't need to open the app to control it. The notification panel adapts dynamically:
-* **Standby Mode:** `[START]`, `[EXIT]` buttons.
-* **Recording Mode:** `[STOP]`, `[LOCK]`, `[EXIT]` buttons.
-  The panel displays live telemetry: `Active Lens | Resolution | FPS | Current ISO | Target Bitrate`.
-
-### Advanced Settings
-Fine-tuning under the hood:
-* Lens selection (Ultra-Wide, Main Sensor, Cabin Front)
-* Video Quality (720p HD, 1080p Full HD, 4K UHD) and Framerate (30 / 60 FPS)
-* Storage Limit configuration (Loop files count)
-* App Localization (English / Russian)
-
----
-
-## 🚀 Installation & Setup (For Developers)
-
-1. Clone the repository:
-   ```bash
-   git clone [https://github.com/DmytroSyrovatskyi/MyDashcam.git](https://github.com/DmytroSyrovatskyi/MyDashcam.git)
+* Kotlin
+* CameraX API & Camera2Interop
+* MediaRecorder (HEVC/H.265)
+* Kotlin Coroutines

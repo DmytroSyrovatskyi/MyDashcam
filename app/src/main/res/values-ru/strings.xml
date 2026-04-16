@@ -42,4 +42,8 @@
     <string name="toast_perms_needed">Сначала откройте приложение и дайте права!</string>
     <string name="toast_recording_stopped">⏹ ОСТАНОВЛЕНО</string>
     <string name="toast_recording_started">▶ ЗАПИСЬ ПОШЛА!</string>
+
+    <string name="desc_camera_preview">Превью камеры</string>
+
+    <string name="tab_preview">ПРЕВЬЮ</string>
 </resources>

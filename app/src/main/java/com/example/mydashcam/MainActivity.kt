@@ -2,10 +2,12 @@ package com.example.mydashcam
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.*
+import android.app.AlertDialog
+import android.app.LocaleManager
 import android.content.*
 import android.content.pm.PackageManager
 import android.database.ContentObserver
+import android.graphics.Matrix
 import android.graphics.Typeface
 import android.hardware.camera2.CameraCharacteristics
 import android.media.MediaRecorder
@@ -16,6 +18,7 @@ import android.text.SpannableString
 import android.text.style.StyleSpan
 import android.view.*
 import android.widget.*
+import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -25,7 +28,8 @@ import androidx.core.content.edit
 import androidx.core.graphics.toColorInt
 import androidx.recyclerview.widget.*
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
 
 data class VideoItem(
     val id: Long,
@@ -37,7 +41,11 @@ data class VideoItem(
     val isLocked: Boolean
 )
 
-class MainActivity : Activity() {
+enum class TabState {
+    TIMELINE, PROTECTED, PREVIEW
+}
+
+class MainActivity : AppCompatActivity() {
 
     private lateinit var btnToggleRecord: CardView
     private lateinit var iconToggleRecord: ImageView
@@ -45,17 +53,68 @@ class MainActivity : Activity() {
     private lateinit var btnSettings: ImageButton
     private lateinit var statusText: TextView
     private lateinit var recyclerView: RecyclerView
+
     private lateinit var btnTabTemp: TextView
     private lateinit var btnTabSaved: TextView
+    private lateinit var btnTabPreview: TextView
+    private lateinit var previewImageView: ImageView
 
-    private var showingSaved = false
+    private var cameraServiceBinder: CameraService.LocalBinder? = null
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            cameraServiceBinder = service as CameraService.LocalBinder
+
+            cameraServiceBinder?.setPreviewListener { bitmap, rotationDegrees ->
+                runOnUiThread {
+                    val viewWidth = previewImageView.width.toFloat()
+                    val viewHeight = previewImageView.height.toFloat()
+
+                    if (viewWidth > 0 && viewHeight > 0) {
+                        val matrix = Matrix()
+                        val bw = bitmap.width.toFloat()
+                        val bh = bitmap.height.toFloat()
+
+                        matrix.postTranslate(-bw / 2f, -bh / 2f)
+                        matrix.postRotate(rotationDegrees.toFloat())
+
+                        val isPortrait = rotationDegrees % 180 != 0
+                        val rotatedW = if (isPortrait) bh else bw
+                        val rotatedH = if (isPortrait) bw else bh
+
+                        val scale = minOf(viewWidth / rotatedW, viewHeight / rotatedH)
+                        matrix.postScale(scale, scale)
+
+                        if (cameraServiceBinder?.isFrontCamera() == true) {
+                            matrix.postScale(-1f, 1f)
+                        }
+
+                        matrix.postTranslate(viewWidth / 2f, viewHeight / 2f)
+
+                        previewImageView.scaleType = ImageView.ScaleType.MATRIX
+                        previewImageView.imageMatrix = matrix
+                        previewImageView.setImageBitmap(bitmap)
+                    } else {
+                        previewImageView.setImageBitmap(bitmap)
+                    }
+                }
+            }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            cameraServiceBinder?.setPreviewListener(null)
+            cameraServiceBinder = null
+        }
+    }
+
+    private var currentTab = TabState.PREVIEW
     private val videoList = mutableListOf<VideoItem>()
     private lateinit var adapter: VideoAdapter
 
     private val mediaStoreObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean, uri: Uri?) {
             super.onChange(selfChange, uri)
-            loadVideos()
+            if (currentTab != TabState.PREVIEW) loadVideos()
         }
     }
 
@@ -68,84 +127,142 @@ class MainActivity : Activity() {
 
         setContentView(R.layout.activity_main)
 
-        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            arrayOf(
-                Manifest.permission.CAMERA,
-                Manifest.permission.RECORD_AUDIO,
-                Manifest.permission.POST_NOTIFICATIONS,
-                Manifest.permission.READ_MEDIA_VIDEO,
-                Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
-            )
-        } else {
-            arrayOf(
-                Manifest.permission.CAMERA,
-                Manifest.permission.RECORD_AUDIO,
-                Manifest.permission.POST_NOTIFICATIONS,
-                Manifest.permission.READ_MEDIA_VIDEO
-            )
-        }
-        requestPermissions(permissions, 101)
-
+        previewImageView = findViewById(R.id.previewImageView)
         btnToggleRecord = findViewById(R.id.btnToggleRecord)
         iconToggleRecord = findViewById(R.id.iconToggleRecord)
         btnLockFile = findViewById(R.id.btnLockFile)
         btnSettings = findViewById(R.id.btnSettings)
         statusText = findViewById(R.id.statusText)
         recyclerView = findViewById(R.id.recyclerViewVideos)
+
         btnTabTemp = findViewById(R.id.btnTabTemp)
         btnTabSaved = findViewById(R.id.btnTabSaved)
+        btnTabPreview = findViewById(R.id.btnTabPreview)
 
         recyclerView.layoutManager = LinearLayoutManager(this)
         adapter = VideoAdapter()
         recyclerView.adapter = adapter
 
-        btnTabTemp.setOnClickListener { showingSaved = false; updateTabsUI(); loadVideos() }
-        btnTabSaved.setOnClickListener { showingSaved = true; updateTabsUI(); loadVideos() }
+        btnTabTemp.setOnClickListener { switchTab(TabState.TIMELINE) }
+        btnTabSaved.setOnClickListener { switchTab(TabState.PROTECTED) }
+        btnTabPreview.setOnClickListener { switchTab(TabState.PREVIEW) }
 
         btnToggleRecord.setOnClickListener {
-            val intent = Intent(this, CameraService::class.java).apply {
-                action = if (CameraService.isRecordingActive) CameraService.ACTION_STOP else CameraService.ACTION_START
+            if (!hasPermissions()) return@setOnClickListener
+            try {
+                val intent = Intent(this, CameraService::class.java).apply {
+                    action = if (CameraService.isRecordingActive) CameraService.ACTION_STOP else CameraService.ACTION_START
+                }
+                ContextCompat.startForegroundService(this, intent)
+                Handler(Looper.getMainLooper()).postDelayed({ updateUiState() }, 400)
+            } catch (e: Exception) {
+                Toast.makeText(this, "Error starting record: ${e.message}", Toast.LENGTH_SHORT).show()
             }
-            ContextCompat.startForegroundService(this, intent)
-            Handler(Looper.getMainLooper()).postDelayed({ updateUiState() }, 400)
         }
 
         btnLockFile.setOnClickListener {
             if (CameraService.isRecordingActive) {
-                ContextCompat.startForegroundService(this, Intent(this, CameraService::class.java).apply { action = CameraService.ACTION_LOCK })
-                Toast.makeText(this, getString(R.string.msg_locked), Toast.LENGTH_SHORT).show()
+                try {
+                    ContextCompat.startForegroundService(this, Intent(this, CameraService::class.java).apply { action = CameraService.ACTION_LOCK })
+                    Toast.makeText(this, getString(R.string.msg_locked), Toast.LENGTH_SHORT).show()
+                } catch (_: Exception) {}
             }
         }
 
-        btnSettings.setOnClickListener { openSmartSettingsDialog() }
+        btnSettings.setOnClickListener {
+            if (CameraService.isRecordingActive) {
+                val msg = if (Locale.getDefault().language == "ru") "Остановите запись для настройки" else "Stop recording to change settings"
+                Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+            } else {
+                openSmartSettingsDialog()
+            }
+        }
 
+        requestAppPermissions()
+    }
+
+    private fun requestAppPermissions() {
+        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+        } else {
+            arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.READ_MEDIA_VIDEO)
+        }
+
+        if (!hasPermissions()) {
+            requestPermissions(permissions, 101)
+        } else {
+            checkFirstRun()
+        }
+    }
+
+    private fun hasPermissions(): Boolean {
+        val hasCam = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        val hasMic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        return hasCam && hasMic
+    }
+
+    private fun checkFirstRun() {
+        val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
         if (!prefs.contains("f_run")) {
-            Handler(Looper.getMainLooper()).post { openSmartSettingsDialog() }
             prefs.edit { putBoolean("f_run", true) }
+            openSmartSettingsDialog()
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (hasPermissions()) {
+            checkFirstRun()
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (hasPermissions()) {
+            try {
+                val intent = Intent(this, CameraService::class.java).apply { action = CameraService.ACTION_STANDBY }
+                ContextCompat.startForegroundService(this, intent)
+                bindService(Intent(this, CameraService::class.java), serviceConnection, BIND_AUTO_CREATE)
+            } catch (_: Exception) {}
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        cameraServiceBinder?.setPreviewListener(null)
+        try { unbindService(serviceConnection) } catch (_: Exception) {}
+        cameraServiceBinder = null
+
+        if (hasPermissions() && !CameraService.isRecordingActive) {
+            try {
+                val intent = Intent(this, CameraService::class.java).apply {
+                    action = CameraService.ACTION_PAUSE_PREVIEW
+                }
+                startService(intent)
+            } catch (_: Exception) {}
         }
     }
 
     private fun setAppLocale(langCode: String) {
+        // Убрали проверку SDK_INT, так как проект >= 33
         val lm = getSystemService(LocaleManager::class.java)
-        lm.applicationLocales = LocaleList(Locale(langCode))
+        lm.applicationLocales = LocaleList(Locale.forLanguageTag(langCode))
     }
 
     override fun onResume() {
         super.onResume()
         contentResolver.registerContentObserver(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, mediaStoreObserver)
-        loadVideos()
-        updateTabsUI()
+        switchTab(currentTab)
         updateUiState()
 
-        // ВЫЗОВ ПАНЕЛИ: Если права есть, кидаем команду STANDBY для отображения уведомления
-        val hasCam = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-        val hasMic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-
-        if (hasCam && hasMic) {
-            val intent = Intent(this, CameraService::class.java).apply {
-                action = CameraService.ACTION_STANDBY
-            }
-            ContextCompat.startForegroundService(this, intent)
+        if (hasPermissions() && cameraServiceBinder == null) {
+            Handler(Looper.getMainLooper()).postDelayed({
+                try {
+                    val intent = Intent(this, CameraService::class.java).apply { action = CameraService.ACTION_STANDBY }
+                    ContextCompat.startForegroundService(this, intent)
+                    bindService(Intent(this, CameraService::class.java), serviceConnection, BIND_AUTO_CREATE)
+                } catch (_: Exception) {}
+            }, 300)
         }
     }
 
@@ -154,15 +271,27 @@ class MainActivity : Activity() {
         contentResolver.unregisterContentObserver(mediaStoreObserver)
     }
 
-    private fun updateTabsUI() {
-        btnTabTemp.isSelected = !showingSaved
-        btnTabSaved.isSelected = showingSaved
-
+    private fun switchTab(tab: TabState) {
+        currentTab = tab
         val active = ContextCompat.getColor(this, R.color.text_active)
         val inactive = ContextCompat.getColor(this, R.color.text_inactive)
 
-        btnTabTemp.setTextColor(if (!showingSaved) active else inactive)
-        btnTabSaved.setTextColor(if (showingSaved) active else inactive)
+        btnTabTemp.isSelected = (tab == TabState.TIMELINE)
+        btnTabSaved.isSelected = (tab == TabState.PROTECTED)
+        btnTabPreview.isSelected = (tab == TabState.PREVIEW)
+
+        btnTabTemp.setTextColor(if (tab == TabState.TIMELINE) active else inactive)
+        btnTabSaved.setTextColor(if (tab == TabState.PROTECTED) active else inactive)
+        btnTabPreview.setTextColor(if (tab == TabState.PREVIEW) active else inactive)
+
+        if (tab == TabState.PREVIEW) {
+            recyclerView.visibility = View.GONE
+            previewImageView.visibility = View.VISIBLE
+        } else {
+            previewImageView.visibility = View.GONE
+            recyclerView.visibility = View.VISIBLE
+            loadVideos()
+        }
     }
 
     @SuppressLint("SetTextI18n")
@@ -206,9 +335,10 @@ class MainActivity : Activity() {
         ProcessCameraProvider.getInstance(this).addListener({
             val provider = ProcessCameraProvider.getInstance(this).get()
             val all = provider.availableCameraInfos
-            val fCam = all.firstOrNull { it.lensFacing == CameraSelector.LENS_FACING_FRONT }
-            val bStd = all.filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }.maxByOrNull { Camera2CameraInfo.from(it).getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull() ?: 0f }
-            val bWide = all.filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }.minByOrNull { Camera2CameraInfo.from(it).getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull() ?: Float.MAX_VALUE }
+
+            val fCam = all.firstOrNull { info: CameraInfo -> info.lensFacing == CameraSelector.LENS_FACING_FRONT }
+            val bStd = all.filter { info: CameraInfo -> info.lensFacing == CameraSelector.LENS_FACING_BACK }.maxByOrNull { info: CameraInfo -> Camera2CameraInfo.from(info).getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull() ?: 0f }
+            val bWide = all.filter { info: CameraInfo -> info.lensFacing == CameraSelector.LENS_FACING_BACK }.minByOrNull { info: CameraInfo -> Camera2CameraInfo.from(info).getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull() ?: Float.MAX_VALUE }
 
             val scroll = ScrollView(this)
             val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(64, 48, 64, 48) }
@@ -220,7 +350,6 @@ class MainActivity : Activity() {
                 layout.addView(tv)
             }
 
-            // 1. LANGUAGE
             addHeader(if(cLang == "ru") "Язык" else "Language")
             val rgL = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
             val rbRu = RadioButton(this).apply { text = "RU"; setPadding(0,0,40,0) }
@@ -228,7 +357,6 @@ class MainActivity : Activity() {
             rgL.addView(rbRu); rgL.addView(rbEn); if(cLang == "ru") rbRu.isChecked = true else rbEn.isChecked = true
             layout.addView(rgL)
 
-            // 2. LENS
             addHeader(if(cLang == "ru") "Объектив" else "Camera Lens")
             val rgC = RadioGroup(this).apply { orientation = LinearLayout.VERTICAL }
             val rbA = RadioButton(this).apply { text = if(cLang == "ru") "Ультра-широкий (Авто)" else "Ultra-Wide (Auto)" }
@@ -239,7 +367,6 @@ class MainActivity : Activity() {
             when(cCam) { "front" -> rbF.isChecked = true; "back" -> rbB.isChecked = true; else -> rbA.isChecked = true }
             layout.addView(rgC)
 
-            // 3. RESOLUTION
             addHeader(if(cLang == "ru") "Разрешение" else "Resolution")
             val rb4 = RadioButton(this).apply { text = "4K UHD" }
             val rb1 = RadioButton(this).apply { text = "1080p Full HD" }
@@ -250,7 +377,6 @@ class MainActivity : Activity() {
             if(sRes == "4k") rb4.isChecked = true else if(sRes == "720") rb7.isChecked = true else rb1.isChecked = true
             layout.addView(rgR)
 
-            // 4. FRAMERATE
             addHeader(if(cLang == "ru") "Частота кадров" else "Framerate")
             val rgF = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
             val rb6 = RadioButton(this).apply { text = "60 FPS"; setPadding(0,0,40,0) }
@@ -259,7 +385,6 @@ class MainActivity : Activity() {
             if(prefs.getInt("pref_fps", 30) == 60) rb6.isChecked = true else rb3.isChecked = true
             layout.addView(rgF)
 
-            // 5. STORAGE LIMIT
             addHeader(if(cLang == "ru") "Лимит памяти" else "Storage Limit")
             val loopL = TextView(this).apply { textSize = 15f; setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_active)) }
             val cycleI = TextView(this).apply { text = "⏱ 1 cycle = 10 minutes"; textSize = 12f; setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_inactive)); setPadding(0,4,0,16) }
@@ -273,9 +398,9 @@ class MainActivity : Activity() {
                     val ch = Camera2CameraInfo.from(c)
                     val m = ch.getCameraCharacteristic(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
                     val sz = m?.getOutputSizes(MediaRecorder::class.java)
-                    s1 = sz?.any { it.width == 1920 } == true
-                    s4 = sz?.any { it.width >= 3840 } == true
-                    s6 = ch.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)?.any { it.upper >= 60 } == true
+                    s1 = sz?.any { size -> size.width == 1920 } == true
+                    s4 = sz?.any { size -> size.width >= 3840 } == true
+                    s6 = ch.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)?.any { range -> range.upper >= 60 } == true
                 }
                 rb4.isEnabled = s4; rb1.isEnabled = s1; rb6.isEnabled = s6
                 if(!s4 && rb4.isChecked) rb1.isChecked = true
@@ -312,7 +437,18 @@ class MainActivity : Activity() {
                         putInt("pref_fps", if(rb6.isChecked)60 else 30)
                         putInt("max_loop_files", cFiles)
                     }
-                    if (sL != cLang) { setAppLocale(sL); recreate() } else updateUiState()
+                    if (sL != cLang) {
+                        setAppLocale(sL)
+                        recreate()
+                    } else {
+                        updateUiState()
+                        if (hasPermissions() && !CameraService.isRecordingActive) {
+                            try {
+                                val intent = Intent(this@MainActivity, CameraService::class.java).apply { action = CameraService.ACTION_STANDBY }
+                                ContextCompat.startForegroundService(this@MainActivity, intent)
+                            } catch (_: Exception) {}
+                        }
+                    }
                 }.show()
         }, ContextCompat.getMainExecutor(this))
     }
@@ -333,8 +469,8 @@ class MainActivity : Activity() {
                     val isL = name.startsWith("LOCKED_")
                     val item = VideoItem(cursor.getLong(0), name, cursor.getLong(2), cursor.getLong(3), cursor.getLong(4), ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cursor.getLong(0)), isL)
 
-                    if (showingSaved && isL) videoList.add(item)
-                    else if (!showingSaved && name.startsWith("BVR_PRO_")) videoList.add(item)
+                    if (currentTab == TabState.PROTECTED && isL) videoList.add(item)
+                    else if (currentTab == TabState.TIMELINE && name.startsWith("BVR_PRO_")) videoList.add(item)
                 }
             }
             adapter.notifyDataSetChanged()

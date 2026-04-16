@@ -42,4 +42,8 @@
     <string name="toast_perms_needed">Please open the app first and grant permissions!</string>
     <string name="toast_recording_stopped">⏹ STOPPED</string>
     <string name="toast_recording_started">▶ RECORDING STARTED!</string>
+
+    <string name="desc_camera_preview">Camera Live Preview</string>
+
+    <string name="tab_preview">PREVIEW</string>
 </resources>
