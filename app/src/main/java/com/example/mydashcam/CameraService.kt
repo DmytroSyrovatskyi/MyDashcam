@@ -145,7 +145,6 @@ class CameraService : LifecycleService() {
         val nm = getSystemService(NotificationManager::class.java)
         nm?.createNotificationChannel(NotificationChannel(chId, "BVR", NotificationManager.IMPORTANCE_LOW))
 
-        // Тянем локализованные строки для объектива
         val camLabel = when(prefCameraType) {
             "front" -> getString(R.string.cam_front)
             "back" -> getString(R.string.cam_main)
@@ -153,14 +152,12 @@ class CameraService : LifecycleService() {
         }
         val resLabel = if(prefResolution == "4k") "4K UHD" else "${prefResolution}p"
 
-        // Локализованный текст статистики
         val statsText = if (isRecordingActive) {
             getString(R.string.notif_stats_format, camLabel, resLabel, prefFps, isoEma.toInt(), nextTargetBitrate / 1_000_000)
         } else {
             getString(R.string.notif_body_ready)
         }
 
-        // Локализованный заголовок
         val notifTitle = if (isRecordingActive) getString(R.string.notif_title_recording) else getString(R.string.notif_title_standby)
 
         val startPI = PendingIntent.getService(this, 10, Intent(this, CameraService::class.java).apply { action = ACTION_START }, PendingIntent.FLAG_IMMUTABLE)
@@ -176,7 +173,6 @@ class CameraService : LifecycleService() {
             .setColorized(true)
             .setColor(if (isRecordingActive) 0xFFD32F2F.toInt() else 0xFF388E3C.toInt())
 
-        // Локализованные кнопки
         if (isRecordingActive) {
             builder.addAction(android.R.drawable.ic_media_pause, getString(R.string.btn_stop), stopPI)
             builder.addAction(android.R.drawable.ic_lock_lock, getString(R.string.btn_lock), lockPI)
@@ -219,8 +215,32 @@ class CameraService : LifecycleService() {
         }
     }
 
-    private fun playStartSound() { try { MediaPlayer.create(this, R.raw.s25_ultra_notification).apply { start(); setOnCompletionListener { release() } } } catch(_:Exception){} }
-    private fun playStopSound() { try { MediaPlayer.create(this, R.raw.alpha).apply { start(); setOnCompletionListener { release() } } } catch(_:Exception){} }
+    // Воспроизведение звука принудительно через встроенный динамик телефона
+    private fun playStartSound() {
+        try {
+            val mp = MediaPlayer.create(this, R.raw.s25_ultra_notification)
+            val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+            val speakers = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            speakers.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }?.let { speaker ->
+                mp.setPreferredDevice(speaker) // Игнорируем Bluetooth для вывода звука
+            }
+            mp.start()
+            mp.setOnCompletionListener { it.release() }
+        } catch(_:Exception){}
+    }
+
+    private fun playStopSound() {
+        try {
+            val mp = MediaPlayer.create(this, R.raw.alpha)
+            val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+            val speakers = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            speakers.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }?.let { speaker ->
+                mp.setPreferredDevice(speaker)
+            }
+            mp.start()
+            mp.setOnCompletionListener { it.release() }
+        } catch(_:Exception){}
+    }
 
     private fun executeLock() {
         val uri = currentVideoUri
@@ -288,24 +308,55 @@ class CameraService : LifecycleService() {
                 val sensorOri = Camera2CameraInfo.from(target!!).getCameraCharacteristic(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
                 val rot = (sensorOri + (if (target.lensFacing == CameraSelector.LENS_FACING_FRONT) -deviceOrientationAngle else deviceOrientationAngle) + 360) % 360
 
+                // Ищем встроенный микрофон телефона, чтобы переопределить настройки
+                val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+                val mics = audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
+                val builtInMic = mics.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
+
                 mediaRecorder = MediaRecorder(this).apply {
-                    setAudioSource(MediaRecorder.AudioSource.CAMCORDER)
+                    setAudioSource(MediaRecorder.AudioSource.MIC)
                     setVideoSource(MediaRecorder.VideoSource.SURFACE)
                     setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+
                     setVideoEncoder(MediaRecorder.VideoEncoder.HEVC)
                     setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+
                     setVideoEncodingBitRate(nextTargetBitrate)
                     setVideoFrameRate(prefFps)
                     setVideoSize(w, h)
+
+                    // Жесткая настройка студийного аудио
                     setAudioChannels(1)
-                    setAudioSamplingRate(44100)
+                    setAudioSamplingRate(48000)
+                    setAudioEncodingBitRate(128000)
+
                     setOutputFile(pfd!!.fileDescriptor)
                     setOrientationHint(rot)
+
+                    // Переопределяем запись строго на микрофон телефона
+                    builtInMic?.let { setPreferredDevice(it) }
+
                     try { prepare() } catch(_: Exception) {
                         reset()
-                        setAudioSource(MediaRecorder.AudioSource.CAMCORDER); setVideoSource(MediaRecorder.VideoSource.SURFACE); setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                        setVideoEncoder(MediaRecorder.VideoEncoder.H264); setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                        setVideoEncodingBitRate(nextTargetBitrate); setVideoFrameRate(prefFps); setVideoSize(w, h); setOutputFile(pfd!!.fileDescriptor); setOrientationHint(rot); prepare()
+                        setAudioSource(MediaRecorder.AudioSource.MIC)
+                        setVideoSource(MediaRecorder.VideoSource.SURFACE)
+                        setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                        setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+                        setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+
+                        setVideoEncodingBitRate(nextTargetBitrate)
+                        setVideoFrameRate(prefFps)
+                        setVideoSize(w, h)
+
+                        setAudioChannels(1)
+                        setAudioSamplingRate(48000)
+                        setAudioEncodingBitRate(128000)
+
+                        setOutputFile(pfd!!.fileDescriptor)
+                        setOrientationHint(rot)
+
+                        builtInMic?.let { setPreferredDevice(it) }
+                        prepare()
                     }
                 }
 
