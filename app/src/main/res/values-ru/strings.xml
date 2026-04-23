@@ -52,4 +52,7 @@
     <string name="settings_pip">Режим «Окно в окне»</string>
     <string name="settings_pip_desc">Показывать мини-плеер при сворачивании</string>
     <string name="infinite_storage">БЕЗЛИМИТ (Без перезаписи)</string>
+
+    <string name="toast_storage_critical">КРИТИЧЕСКИ МАЛО ПАМЯТИ! Запись остановлена.</string>
+    <string name="toast_storage_warning">ВНИМАНИЕ: Память телефона почти заполнена!</string>
 </resources>

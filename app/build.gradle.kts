@@ -74,4 +74,7 @@ dependencies {
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
     implementation(libs.androidx.recyclerview)
+
+    // ИСПРАВЛЕНИЕ: Добавляем CardView напрямую, чтобы не зависеть от сломанного каталога libs
+    implementation("androidx.cardview:cardview:1.0.0")
 }

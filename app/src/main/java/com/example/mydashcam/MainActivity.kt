@@ -33,6 +33,8 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.core.graphics.toColorInt
 import androidx.recyclerview.widget.*
+import com.example.mydashcam.views.StorageRingView
+import com.example.mydashcam.utils.StorageManager
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -59,6 +61,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnSettings: ImageButton
     private lateinit var statusText: TextView
     private lateinit var recyclerView: RecyclerView
+    private lateinit var storageRing: StorageRingView
 
     private lateinit var btnTabTemp: TextView
     private lateinit var btnTabSaved: TextView
@@ -78,9 +81,7 @@ class MainActivity : AppCompatActivity() {
             cameraServiceBinder?.setPreviewListener { bitmap, rotationDegrees ->
                 runOnUiThread {
                     if (previewImageView.isAvailable) {
-
                         updatePreviewRatio(rotationDegrees)
-
                         val viewWidth = previewImageView.width.toFloat()
                         val viewHeight = previewImageView.height.toFloat()
 
@@ -88,7 +89,6 @@ class MainActivity : AppCompatActivity() {
                             val canvas = previewImageView.lockCanvas()
                             if (canvas != null) {
                                 canvas.drawColor(android.graphics.Color.BLACK)
-
                                 val matrix = Matrix()
                                 val bw = bitmap.width.toFloat()
                                 val bh = bitmap.height.toFloat()
@@ -106,18 +106,17 @@ class MainActivity : AppCompatActivity() {
                                 if (cameraServiceBinder?.isFrontCamera() == true) {
                                     matrix.postScale(-1f, 1f)
                                 }
-
                                 matrix.postTranslate(viewWidth / 2f, viewHeight / 2f)
-
                                 val paint = Paint().apply { isFilterBitmap = true }
                                 canvas.drawBitmap(bitmap, matrix, paint)
-
                                 previewImageView.unlockCanvasAndPost(canvas)
                             }
                         }
                     }
                 }
             }
+            // Сразу после подключения обновляем UI, чтобы кольцо узнало время старта
+            runOnUiThread { updateUiState() }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -131,7 +130,6 @@ class MainActivity : AppCompatActivity() {
     private fun updatePreviewRatio(rotation: Int) {
         if (lastKnownRotation == rotation) return
         lastKnownRotation = rotation
-
         val params = previewImageView.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
         val isPortrait = rotation % 180 != 0
         params.dimensionRatio = if (isPortrait) "9:16" else "16:9"
@@ -146,12 +144,12 @@ class MainActivity : AppCompatActivity() {
         override fun onChange(selfChange: Boolean, uri: Uri?) {
             super.onChange(selfChange, uri)
             if (currentTab != TabState.PREVIEW) loadVideos()
+            runOnUiThread { updateUiState() }
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
         val lang = prefs.getString("app_lang", "en") ?: "en"
         setAppLocale(lang)
@@ -168,6 +166,7 @@ class MainActivity : AppCompatActivity() {
         btnSettings = findViewById(R.id.btnSettings)
         statusText = findViewById(R.id.statusText)
         recyclerView = findViewById(R.id.recyclerViewVideos)
+        storageRing = findViewById(R.id.storageRing)
 
         btnTabTemp = findViewById(R.id.btnTabTemp)
         btnTabSaved = findViewById(R.id.btnTabSaved)
@@ -225,14 +224,10 @@ class MainActivity : AppCompatActivity() {
         handleAutoStartPip(intent)
     }
 
-    // ИСПРАВЛЕНИЕ: Вычисляет правильную пропорцию для PiP-окна
     private fun getPipRatio(): Rational {
         val w = previewImageView.width
         val h = previewImageView.height
-        if (w > 0 && h > 0) {
-            return Rational(w, h)
-        }
-        return Rational(16, 9)
+        return if (w > 0 && h > 0) Rational(w, h) else Rational(16, 9)
     }
 
     private fun handleAutoStartPip(intent: Intent?) {
@@ -255,16 +250,13 @@ class MainActivity : AppCompatActivity() {
         super.onUserLeaveHint()
         val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
         if (CameraService.isRecordingActive && prefs.getBoolean("pref_pip", false)) {
-            val params = PictureInPictureParams.Builder()
-                .setAspectRatio(getPipRatio())
-                .build()
+            val params = PictureInPictureParams.Builder().setAspectRatio(getPipRatio()).build()
             enterPictureInPictureMode(params)
         }
     }
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
-
         if (isInPictureInPictureMode) {
             controlCard.visibility = View.GONE
             tabLayout.visibility = View.GONE
@@ -279,10 +271,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestAppPermissions() {
-        val permissions = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.READ_MEDIA_VIDEO, "android.permission.READ_MEDIA_VISUAL_USER_SELECTED")
-        if (!hasPermissions()) {
-            requestPermissions(permissions, 101)
-        }
+        val permissions = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.READ_MEDIA_VIDEO)
+        if (!hasPermissions()) requestPermissions(permissions, 101)
     }
 
     private fun hasPermissions(): Boolean {
@@ -291,15 +281,12 @@ class MainActivity : AppCompatActivity() {
         return hasCam && hasMic
     }
 
-    // ИСПРАВЛЕНИЕ: Гарантированный запуск диалога только когда UI готов
     private fun checkFirstRunDialog() {
         val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
         if (!prefs.getBoolean("f_run", false) && !isFirstRunDialogOpen) {
             isFirstRunDialogOpen = true
             window.decorView.post {
-                if (!isFinishing && !isDestroyed) {
-                    openSmartSettingsDialog()
-                }
+                if (!isFinishing && !isDestroyed) openSmartSettingsDialog()
             }
         }
     }
@@ -308,9 +295,7 @@ class MainActivity : AppCompatActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (hasPermissions()) {
             checkFirstRunDialog()
-            try {
-                contentResolver.registerContentObserver(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, mediaStoreObserver)
-            } catch (_: Exception) {}
+            try { contentResolver.registerContentObserver(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, mediaStoreObserver) } catch (_: Exception) {}
         }
     }
 
@@ -328,21 +313,12 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         CameraService.isAppVisible = true
-
         if (hasPermissions()) {
-            // Задержка на первый запуск, чтобы не блочило UI
-            Handler(Looper.getMainLooper()).postDelayed({
-                checkFirstRunDialog()
-            }, 500)
-
-            try {
-                contentResolver.registerContentObserver(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, mediaStoreObserver)
-            } catch (_: Exception) {}
+            Handler(Looper.getMainLooper()).postDelayed({ checkFirstRunDialog() }, 500)
+            try { contentResolver.registerContentObserver(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, mediaStoreObserver) } catch (_: Exception) {}
         }
-
         switchTab(currentTab)
         updateUiState()
-
         if (hasPermissions() && cameraServiceBinder == null) {
             Handler(Looper.getMainLooper()).postDelayed({
                 try {
@@ -356,16 +332,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        try {
-            contentResolver.unregisterContentObserver(mediaStoreObserver)
-        } catch (_: Exception) {}
+        try { contentResolver.unregisterContentObserver(mediaStoreObserver) } catch (_: Exception) {}
     }
 
     override fun onStop() {
         super.onStop()
-
         if (isInPictureInPictureMode) return
-
         CameraService.isAppVisible = false
         cameraServiceBinder?.setPreviewListener(null)
         try { unbindService(serviceConnection) } catch (_: Exception) {}
@@ -373,9 +345,7 @@ class MainActivity : AppCompatActivity() {
 
         if (hasPermissions() && !CameraService.isRecordingActive) {
             try {
-                val intent = Intent(this, CameraService::class.java).apply {
-                    action = CameraService.ACTION_PAUSE_PREVIEW
-                }
+                val intent = Intent(this, CameraService::class.java).apply { action = CameraService.ACTION_PAUSE_PREVIEW }
                 startService(intent)
             } catch (_: Exception) {}
         }
@@ -385,9 +355,7 @@ class MainActivity : AppCompatActivity() {
         try {
             val lm = getSystemService(LocaleManager::class.java)
             val currentLang = if (lm?.applicationLocales?.isEmpty == false) lm.applicationLocales[0].language else ""
-            if (currentLang != langCode) {
-                lm?.applicationLocales = LocaleList(Locale.forLanguageTag(langCode))
-            }
+            if (currentLang != langCode) lm?.applicationLocales = LocaleList(Locale.forLanguageTag(langCode))
         } catch (_: Exception) {}
     }
 
@@ -395,11 +363,9 @@ class MainActivity : AppCompatActivity() {
         currentTab = tab
         val active = ContextCompat.getColor(this, R.color.text_active)
         val inactive = ContextCompat.getColor(this, R.color.text_inactive)
-
         btnTabTemp.isSelected = (tab == TabState.TIMELINE)
         btnTabSaved.isSelected = (tab == TabState.PROTECTED)
         btnTabPreview.isSelected = (tab == TabState.PREVIEW)
-
         btnTabTemp.setTextColor(if (tab == TabState.TIMELINE) active else inactive)
         btnTabSaved.setTextColor(if (tab == TabState.PROTECTED) active else inactive)
         btnTabPreview.setTextColor(if (tab == TabState.PREVIEW) active else inactive)
@@ -417,6 +383,7 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetTextI18n")
     private fun updateUiState() {
         val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
+        val limit = prefs.getInt("max_loop_files", 6)
 
         val cam = when(prefs.getString("pref_camera", "auto")) {
             "front" -> getString(R.string.cam_front)
@@ -426,7 +393,20 @@ class MainActivity : AppCompatActivity() {
         val res = prefs.getString("pref_resolution", "1080").let { if(it=="4k") "4K UHD" else "${it}p HD" }
         val fps = prefs.getInt("pref_fps", 30)
 
-        val statusLine = if (CameraService.isRecordingActive) getString(R.string.status_recording) else getString(R.string.status_waiting)
+        // 1. Получаем счетчик файлов для Loop: X / Y
+        val currentFiles = StorageManager.getFilesCount(this)
+        val loopText = if (limit > 50) "Loop: OFF" else "Loop: $currentFiles / $limit files"
+
+        // 2. Считаем прогресс ТЕКУЩЕГО 10-минутного ролика для кольца
+        val startTime = cameraServiceBinder?.getRecordingStartTime() ?: 0L
+        val fileProgress = if (CameraService.isRecordingActive && startTime > 0) {
+            val elapsed = System.currentTimeMillis() - startTime
+            (elapsed.toFloat() / 600000f).coerceIn(0f, 1f) // 10 мин
+        } else 0f
+        storageRing.setProgress(fileProgress)
+
+        // 3. Формируем текст статуса
+        val statusLine = if (CameraService.isRecordingActive) "${getString(R.string.status_recording)}  |  $loopText" else "${getString(R.string.status_waiting)}  |  $loopText"
         val configLine = "$cam  |  $res  |  $fps FPS"
 
         val fullText = SpannableString("$statusLine\n$configLine")
@@ -452,31 +432,22 @@ class MainActivity : AppCompatActivity() {
         var cFiles = prefs.getInt("max_loop_files", 6)
         val cLang = prefs.getString("app_lang", "en") ?: "en"
         var cCodec = prefs.getString("pref_codec", "auto") ?: "auto"
-
         val isFirstRun = !prefs.getBoolean("f_run", false)
 
         ProcessCameraProvider.getInstance(this).addListener({
             val provider = ProcessCameraProvider.getInstance(this).get()
             val all = provider.availableCameraInfos
-
-            val fCam = all.firstOrNull { info: CameraInfo -> info.lensFacing == CameraSelector.LENS_FACING_FRONT }
-            val bStd = all.filter { info: CameraInfo -> info.lensFacing == CameraSelector.LENS_FACING_BACK }.maxByOrNull { info: CameraInfo -> Camera2CameraInfo.from(info).getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull() ?: 0f }
-            val bWide = all.filter { info: CameraInfo -> info.lensFacing == CameraSelector.LENS_FACING_BACK }.minByOrNull { info: CameraInfo -> Camera2CameraInfo.from(info).getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull() ?: Float.MAX_VALUE }
+            val fCam = all.firstOrNull { it.lensFacing == CameraSelector.LENS_FACING_FRONT }
+            val bStd = all.filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }.maxByOrNull { Camera2CameraInfo.from(it).getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull() ?: 0f }
+            val bWide = all.filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }.minByOrNull { Camera2CameraInfo.from(it).getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull() ?: Float.MAX_VALUE }
 
             val scroll = ScrollView(this)
             val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(64, 48, 64, 48) }
-
-            fun addHeader(t: String) {
-                val tv = TextView(this).apply {
-                    text = t.uppercase(); textSize = 11f; setTypeface(null, Typeface.BOLD); setTextColor("#66BB6A".toColorInt()); setPadding(0, 48, 0, 16)
-                }
-                layout.addView(tv)
-            }
+            fun addHeader(t: String) { layout.addView(TextView(this).apply { text = t.uppercase(); textSize = 11f; setTypeface(null, Typeface.BOLD); setTextColor("#66BB6A".toColorInt()); setPadding(0, 48, 0, 16) }) }
 
             addHeader(if(cLang == "ru") "Язык" else "Language")
             val rgL = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
-            val rbRu = RadioButton(this).apply { text = "RU"; setPadding(0,0,40,0) }
-            val rbEn = RadioButton(this).apply { text = "EN" }
+            val rbRu = RadioButton(this).apply { text = "RU"; setPadding(0,0,40,0) }; val rbEn = RadioButton(this).apply { text = "EN" }
             rgL.addView(rbRu); rgL.addView(rbEn); if(cLang == "ru") rbRu.isChecked = true else rbEn.isChecked = true
             layout.addView(rgL)
 
@@ -495,21 +466,15 @@ class MainActivity : AppCompatActivity() {
             layout.addView(rgC)
 
             addHeader(if(cLang == "ru") "Разрешение" else "Resolution")
-            val rb4 = RadioButton(this).apply { text = "4K UHD" }
-            val rb1 = RadioButton(this).apply { text = "1080p Full HD" }
-            val rb7 = RadioButton(this).apply { text = "720p HD" }
-            val rgR = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
-            rgR.addView(rb4); rgR.addView(rb1); rgR.addView(rb7)
-            val sRes = prefs.getString("pref_resolution", "1080")
-            if(sRes == "4k") rb4.isChecked = true else if(sRes == "720") rb7.isChecked = true else rb1.isChecked = true
+            val rb4 = RadioButton(this).apply { text = "4K UHD" }; val rb1 = RadioButton(this).apply { text = "1080p Full HD" }; val rb7 = RadioButton(this).apply { text = "720p HD" }
+            val rgR = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }; rgR.addView(rb4); rgR.addView(rb1); rgR.addView(rb7)
+            val sRes = prefs.getString("pref_resolution", "1080"); if(sRes == "4k") rb4.isChecked = true else if(sRes == "720") rb7.isChecked = true else rb1.isChecked = true
             layout.addView(rgR)
 
             addHeader(if(cLang == "ru") "Частота кадров" else "Framerate")
             val rgF = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
-            val rb6 = RadioButton(this).apply { text = "60 FPS"; setPadding(0,0,40,0) }
-            val rb3 = RadioButton(this).apply { text = "30 FPS" }
-            rgF.addView(rb6); rgF.addView(rb3)
-            if(prefs.getInt("pref_fps", 30) == 60) rb6.isChecked = true else rb3.isChecked = true
+            val rb6 = RadioButton(this).apply { text = "60 FPS"; setPadding(0,0,40,0) }; val rb3 = RadioButton(this).apply { text = "30 FPS" }
+            rgF.addView(rb6); rgF.addView(rb3); if(prefs.getInt("pref_fps", 30) == 60) rb6.isChecked = true else rb3.isChecked = true
             layout.addView(rgF)
 
             addHeader(if(cLang == "ru") "Формат видео (Кодек)" else "Video Codec")
@@ -531,83 +496,36 @@ class MainActivity : AppCompatActivity() {
                 val t = when(cCam) { "front" -> fCam; "back" -> bStd; else -> bWide ?: bStd }
                 var s4=false; var s1=false; var s6=false
                 t?.let { c ->
-                    val ch = Camera2CameraInfo.from(c)
-                    val m = ch.getCameraCharacteristic(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                    val ch = Camera2CameraInfo.from(c); val m = ch.getCameraCharacteristic(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
                     val sz = m?.getOutputSizes(MediaRecorder::class.java)
-                    s1 = sz?.any { size -> size.width == 1920 } == true
-                    s4 = sz?.any { size -> size.width >= 3840 } == true
-                    s6 = ch.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)?.any { range -> range.upper >= 60 } == true
+                    s1 = sz?.any { it.width == 1920 } == true; s4 = sz?.any { it.width >= 3840 } == true
+                    s6 = ch.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)?.any { it.upper >= 60 } == true
                 }
                 rb4.isEnabled = s4; rb1.isEnabled = s1; rb6.isEnabled = s6
                 if(!s4 && rb4.isChecked) rb1.isChecked = true
                 if(!s6 && rb6.isChecked) rb3.isChecked = true
-
                 val mult = (if(rb4.isChecked) 2.8 else if(rb7.isChecked) 0.6 else 1.0) * (if(rb6.isChecked) 1.6 else 1.0)
                 val codecMult = if(rbCodecHevc.isChecked) 0.7 else 1.0
-
-                if (cFiles > 50) {
-                    storL.text = getString(R.string.infinite_storage)
-                    loopL.text = if(rbRu.isChecked) "Перезапись: ВЫКЛ" else "Loop Record: OFF"
-                } else {
-                    storL.text = String.format(Locale.US, if(rbRu.isChecked) "Объем цикла: %.1f ГБ" else "Estimated loop: %.1f GB", cFiles * 1.5 * mult * codecMult)
-                    loopL.text = if(rbRu.isChecked) "Файлов в цикле: $cFiles" else "Files in loop: $cFiles"
-                }
+                if (cFiles > 50) { storL.text = getString(R.string.infinite_storage); loopL.text = if(rbRu.isChecked) "Перезапись: ВЫКЛ" else "Loop Record: OFF" }
+                else { storL.text = String.format(Locale.US, if(rbRu.isChecked) "Объем цикла: %.1f ГБ" else "Estimated loop: %.1f GB", cFiles * 1.5 * mult * codecMult); loopL.text = if(rbRu.isChecked) "Файлов в цикле: $cFiles" else "Files in loop: $cFiles" }
             }
-
             refresh()
             rgC.setOnCheckedChangeListener { _, id -> cCam = when(id){rbF.id->"front";rbB.id->"back";else->"auto"}; refresh() }
-            rgR.setOnCheckedChangeListener { _, _ -> refresh() }
-            rgF.setOnCheckedChangeListener { _, _ -> refresh() }
+            rgR.setOnCheckedChangeListener { _, _ -> refresh() }; rgF.setOnCheckedChangeListener { _, _ -> refresh() }
             rgCodec.setOnCheckedChangeListener { _, id -> cCodec = when(id){rbCodecHevc.id->"hevc";rbCodecAvc.id->"avc";else->"auto"}; refresh() }
-            seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) {
-                    cFiles = if (p == 18) 999 else p + 3
-                    refresh()
-                }
-                override fun onStartTrackingTouch(s: SeekBar?) {}
-                override fun onStopTrackingTouch(s: SeekBar?) {}
-            })
+            seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener { override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) { cFiles = if (p == 18) 999 else p + 3; refresh() }; override fun onStartTrackingTouch(s: SeekBar?) {}; override fun onStopTrackingTouch(s: SeekBar?) {} })
 
             layout.addView(loopL); layout.addView(cycleI); layout.addView(seek); layout.addView(storL)
             scroll.addView(layout)
 
-            val dialogBuilder = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle(getString(R.string.settings_title))
-                .setView(scroll)
-                .setCancelable(!isFirstRun)
-                .setOnDismissListener { isFirstRunDialogOpen = false }
+            val dialogBuilder = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert).setTitle(getString(R.string.settings_title)).setView(scroll).setCancelable(!isFirstRun).setOnDismissListener { isFirstRunDialogOpen = false }
                 .setPositiveButton(getString(R.string.btn_save_config)) { _, _ ->
                     val sR = if(rb4.isChecked)"4k" else if(rb7.isChecked)"720" else "1080"
                     val sL = if(rbRu.isChecked) "ru" else "en"
-
-                    prefs.edit {
-                        putBoolean("f_run", true)
-                        putString("app_lang", sL)
-                        putBoolean("pref_pip", swPip.isChecked)
-                        putString("pref_camera", cCam)
-                        putString("pref_resolution", sR)
-                        putInt("pref_fps", if(rb6.isChecked)60 else 30)
-                        putInt("max_loop_files", cFiles)
-                        putString("pref_codec", cCodec)
-                    }
-
-                    if (sL != cLang) {
-                        setAppLocale(sL)
-                    } else {
-                        updateUiState()
-                        if (hasPermissions() && !CameraService.isRecordingActive) {
-                            try {
-                                val intent = Intent(this@MainActivity, CameraService::class.java).apply { action = CameraService.ACTION_STANDBY }
-                                ContextCompat.startForegroundService(this@MainActivity, intent)
-                            } catch (_: Exception) {}
-                        }
-                    }
+                    prefs.edit { putBoolean("f_run", true); putString("app_lang", sL); putBoolean("pref_pip", swPip.isChecked); putString("pref_camera", cCam); putString("pref_resolution", sR); putInt("pref_fps", if(rb6.isChecked)60 else 30); putInt("max_loop_files", cFiles); putString("pref_codec", cCodec) }
+                    if (sL != cLang) setAppLocale(sL) else { updateUiState(); if (hasPermissions() && !CameraService.isRecordingActive) { try { startForegroundService(Intent(this@MainActivity, CameraService::class.java).apply { action = CameraService.ACTION_STANDBY }) } catch (_: Exception) {} } }
                 }
-
-            if (!isFirstRun) {
-                dialogBuilder.setNegativeButton(getString(R.string.btn_cancel), null)
-            }
-
+            if (!isFirstRun) dialogBuilder.setNegativeButton(getString(R.string.btn_cancel), null)
             dialogBuilder.show()
         }, ContextCompat.getMainExecutor(this))
     }
@@ -616,74 +534,38 @@ class MainActivity : AppCompatActivity() {
     private fun loadVideos() {
         videoList.clear()
         try {
-            contentResolver.query(
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.DISPLAY_NAME, MediaStore.Video.Media.SIZE, MediaStore.Video.Media.DURATION, MediaStore.Video.Media.DATE_ADDED),
-                "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?",
-                arrayOf("%Movies/MyDashcam%"),
-                "${MediaStore.Video.Media.DATE_ADDED} DESC"
-            )?.use { cursor ->
+            contentResolver.query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.DISPLAY_NAME, MediaStore.Video.Media.SIZE, MediaStore.Video.Media.DURATION, MediaStore.Video.Media.DATE_ADDED), "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?", arrayOf("%Movies/MyDashcam%"), "${MediaStore.Video.Media.DATE_ADDED} DESC")?.use { cursor ->
                 while (cursor.moveToNext()) {
                     val name = cursor.getString(1) ?: ""
                     val isL = name.startsWith("LOCKED_")
                     val item = VideoItem(cursor.getLong(0), name, cursor.getLong(2), cursor.getLong(3), cursor.getLong(4), ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cursor.getLong(0)), isL)
-
                     if (currentTab == TabState.PROTECTED && isL) videoList.add(item)
                     else if (currentTab == TabState.TIMELINE && name.startsWith("BVR_PRO_")) videoList.add(item)
                 }
             }
             adapter.notifyDataSetChanged()
+            updateUiState()
         } catch (_: Exception) {}
     }
 
     inner class VideoAdapter : RecyclerView.Adapter<VideoAdapter.VideoViewHolder>() {
         inner class VideoViewHolder(v: View) : RecyclerView.ViewHolder(v) {
-            val img: ImageView? = v.findViewById(R.id.imgThumbnail)
-            val tD: TextView = v.findViewById(R.id.textVideoDate)
-            val tI: TextView = v.findViewById(R.id.textVideoInfo)
-            val bL: ImageButton = v.findViewById(R.id.btnLockUnlock)
-            val bD: ImageButton = v.findViewById(R.id.btnDelete)
+            val img: ImageView? = v.findViewById(R.id.imgThumbnail); val tD: TextView = v.findViewById(R.id.textVideoDate)
+            val tI: TextView = v.findViewById(R.id.textVideoInfo); val bL: ImageButton = v.findViewById(R.id.btnLockUnlock); val bD: ImageButton = v.findViewById(R.id.btnDelete)
         }
         override fun onCreateViewHolder(p: ViewGroup, t: Int) = VideoViewHolder(LayoutInflater.from(p.context).inflate(R.layout.item_video, p, false))
-
         override fun onBindViewHolder(h: VideoViewHolder, p: Int) {
-            val v = videoList[p]
-            val context = h.itemView.context
-
+            val v = videoList[p]; val context = h.itemView.context
             val sDate = SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault()).format(Date(v.dateAdded * 1000L))
             val eDate = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date((v.dateAdded * 1000L) + v.duration))
             h.tD.text = context.getString(R.string.video_time_range, sDate, eDate)
-
             val sz = if (v.size > 1073741824) String.format(Locale.US, "%.2f GB", v.size / 1073741824.0) else "${v.size / 1048576} MB"
-            val durationMin = (v.duration / 60000).toInt()
-
-            h.tI.text = context.getString(R.string.video_info_format, durationMin, sz)
-
+            h.tI.text = context.getString(R.string.video_info_format, (v.duration / 60000).toInt(), sz)
             h.bL.setImageResource(if (v.isLocked) android.R.drawable.ic_menu_revert else android.R.drawable.ic_menu_save)
-            h.bL.setOnClickListener {
-                val newName = if (v.isLocked) v.name.replace("LOCKED_BVR_PRO_", "BVR_PRO_") else v.name.replace("BVR_PRO_", "LOCKED_BVR_PRO_")
-                contentResolver.update(v.uri, ContentValues().apply { put(MediaStore.Video.Media.DISPLAY_NAME, newName) }, null, null)
-            }
-            h.bD.setOnClickListener {
-                AlertDialog.Builder(context, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                    .setTitle(getString(R.string.dialog_delete_title))
-                    .setMessage(getString(R.string.dialog_delete_msg))
-                    .setPositiveButton(getString(R.string.btn_delete)) { _, _ -> contentResolver.delete(v.uri, null, null) }
-                    .setNegativeButton(getString(R.string.btn_cancel), null).show()
-            }
-
-            h.img?.let { imageView ->
-                try {
-                    val thumbnail = contentResolver.loadThumbnail(v.uri, Size(256, 256), null)
-                    imageView.setImageBitmap(thumbnail)
-                } catch (_: Exception) {
-                    imageView.setImageDrawable(null)
-                }
-            }
-
-            h.itemView.setOnClickListener {
-                startActivity(Intent(Intent.ACTION_VIEW).apply { setDataAndType(v.uri, "video/mp4"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) })
-            }
+            h.bL.setOnClickListener { val newName = if (v.isLocked) v.name.replace("LOCKED_BVR_PRO_", "BVR_PRO_") else v.name.replace("BVR_PRO_", "LOCKED_BVR_PRO_"); contentResolver.update(v.uri, ContentValues().apply { put(MediaStore.Video.Media.DISPLAY_NAME, newName) }, null, null) }
+            h.bD.setOnClickListener { AlertDialog.Builder(context, android.R.style.Theme_DeviceDefault_Dialog_Alert).setTitle(getString(R.string.dialog_delete_title)).setMessage(getString(R.string.dialog_delete_msg)).setPositiveButton(getString(R.string.btn_delete)) { _, _ -> contentResolver.delete(v.uri, null, null) }.setNegativeButton(getString(R.string.btn_cancel), null).show() }
+            try { h.img?.setImageBitmap(contentResolver.loadThumbnail(v.uri, Size(256, 256), null)) } catch (_: Exception) { h.img?.setImageDrawable(null) }
+            h.itemView.setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW).apply { setDataAndType(v.uri, "video/mp4"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }
         }
         override fun getItemCount() = videoList.size
     }

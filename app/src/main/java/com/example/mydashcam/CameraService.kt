@@ -1,8 +1,8 @@
 package com.example.mydashcam
 
 import android.annotation.SuppressLint
-import android.app.*
-import android.content.*
+import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.hardware.camera2.*
@@ -11,7 +11,8 @@ import android.net.Uri
 import android.os.*
 import android.os.Process
 import android.provider.MediaStore
-import android.util.*
+import android.util.Range
+import android.util.Size
 import android.view.OrientationEventListener
 import android.widget.Toast
 import androidx.annotation.OptIn
@@ -21,11 +22,12 @@ import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.createBitmap
-import androidx.core.graphics.toColorInt
-import androidx.lifecycle.*
+import androidx.lifecycle.LifecycleService
+import androidx.lifecycle.lifecycleScope
+import com.example.mydashcam.utils.NotificationHelper
+import com.example.mydashcam.utils.StorageManager
 import kotlinx.coroutines.*
 import java.text.SimpleDateFormat
 import java.util.*
@@ -71,6 +73,7 @@ class CameraService : LifecycleService() {
             previewCallback = listener
         }
         fun isFrontCamera(): Boolean = prefCameraType == "front"
+        fun getRecordingStartTime(): Long = recordingStartTime
     }
 
     override fun onBind(intent: Intent): IBinder {
@@ -180,7 +183,6 @@ class CameraService : LifecycleService() {
                 }
             }
             ACTION_PAUSE_PREVIEW -> {
-                // ИСПРАВЛЕНИЕ: Отвязываем железо камеры, если запись не идет
                 if (!isRecordingActive) {
                     try { cameraProvider?.unbindAll() } catch(_: Exception) {}
                     cameraControl = null
@@ -192,84 +194,37 @@ class CameraService : LifecycleService() {
         return START_STICKY
     }
 
-    private fun updateNotification() {
-        val chId = "DashcamChannel"
-        val nm = getSystemService(NotificationManager::class.java)
-        nm?.createNotificationChannel(NotificationChannel(chId, "BVR", NotificationManager.IMPORTANCE_LOW))
-
-        val camLabel = when(prefCameraType) {
-            "front" -> getString(R.string.cam_front)
-            "back" -> getString(R.string.cam_main)
-            else -> getString(R.string.cam_wide)
-        }
-        val resLabel = if(prefResolution == "4k") "4K UHD" else "${prefResolution}p"
-
-        val statsText = if (isRecordingActive) {
-            getString(R.string.notif_stats_format, camLabel, resLabel, prefFps, isoEma.toInt(), nextTargetBitrate / 1_000_000)
-        } else {
-            getString(R.string.notif_body_ready)
-        }
-
-        val notifTitle = if (isRecordingActive) getString(R.string.notif_title_recording) else getString(R.string.notif_title_standby)
-
+    private fun updateNotification(currentFileProgress: Int = 0) {
         val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
+        val limit = prefs.getInt("max_loop_files", 6)
         val usePip = prefs.getBoolean("pref_pip", false)
+        val filesCount = StorageManager.getFilesCount(this)
+        val loopInfo = if (limit > 50) "∞" else "$filesCount/$limit"
 
-        val startPI = if (usePip) {
-            val intent = Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra("auto_start_pip", true)
-            }
-            PendingIntent.getActivity(this, 11, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        } else {
-            val intent = Intent(this, CameraService::class.java).apply { action = ACTION_START }
-            PendingIntent.getService(this, 10, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        }
-
-        val stopPI = PendingIntent.getService(this, 1, Intent(this, CameraService::class.java).apply { action = ACTION_STOP }, PendingIntent.FLAG_IMMUTABLE)
-        val lockPI = PendingIntent.getService(this, 3, Intent(this, CameraService::class.java).apply { action = ACTION_LOCK }, PendingIntent.FLAG_IMMUTABLE)
-        val exitPI = PendingIntent.getService(this, 4, Intent(this, CameraService::class.java).apply { action = ACTION_EXIT }, PendingIntent.FLAG_IMMUTABLE)
-
-        val smallIconRes = if (isRecordingActive) R.drawable.ic_recording_active else R.drawable.ic_cam_standby
-
-        val colorActive = "#D32F2F".toColorInt()
-        val colorStandby = "#388E3C".toColorInt()
-
-        val builder = NotificationCompat.Builder(this, chId)
-            .setContentTitle(notifTitle)
-            .setContentText(statsText)
-            .setSmallIcon(smallIconRes)
-            .setOngoing(true)
-            .setColorized(true)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setColor(if (isRecordingActive) colorActive else colorStandby)
-
-        if (isRecordingActive) {
-            builder.setUsesChronometer(true)
-            builder.setWhen(recordingStartTime)
-
-            builder.addAction(android.R.drawable.ic_media_pause, getString(R.string.btn_stop), stopPI)
-            builder.addAction(android.R.drawable.ic_lock_lock, getString(R.string.btn_lock), lockPI)
-        } else {
-            builder.setUsesChronometer(false)
-            builder.addAction(android.R.drawable.ic_media_play, getString(R.string.btn_start), startPI)
-        }
-        builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, getString(R.string.btn_exit), exitPI)
-
-        startForeground(
-            1,
-            builder.build(),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        val notification = NotificationHelper.createNotification(
+            context = this,
+            isRecording = isRecordingActive,
+            cameraType = "$prefCameraType ($loopInfo)",
+            resolution = prefResolution,
+            fps = prefFps,
+            iso = isoEma.toInt(),
+            bitrateMbps = nextTargetBitrate / 1_000_000,
+            recordingStartTime = recordingStartTime,
+            usePip = usePip,
+            progressPercent = currentFileProgress
         )
+
+        startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
     }
 
     private fun startDynamicUpdates() {
         dynamicUpdateJob?.cancel()
         dynamicUpdateJob = lifecycleScope.launch {
             var currEv = 0.0f
-            var timer = 0
             while (isRecordingActive) {
-                delay(150)
+                delay(1000)
+
+                // 1. Умная коррекция экспозиции
                 val darkness = ((isoEma - minHardwareIso) / (maxHardwareIso - minHardwareIso)).coerceIn(0f, 1f)
                 val targetEV = 0.0f - (1.5f * darkness)
                 currEv = (targetEV * 0.05f) + (currEv * 0.95f)
@@ -280,14 +235,17 @@ class CameraService : LifecycleService() {
                     cameraControl?.setExposureCompensationIndex(idx)
                 }
 
+                // 2. Расчет битрейта
                 val codecMult = if (prefCodec == "hevc" || prefCodec == "auto") 0.7f else 1.0f
                 val resMult = if(prefResolution == "4k") 2.5f else 1.0f
                 val fpsMult = if(prefFps == 60) 1.5f else 1.0f
-
                 val baseBitrate = (16_000_000f + (12_000_000f * darkness)) * resMult * fpsMult * codecMult
                 nextTargetBitrate = if (isThermalDowngradeActive) (baseBitrate * 0.7f).toInt() else baseBitrate.toInt()
 
-                if (++timer >= 15) { updateNotification(); timer = 0 }
+                // 3. Обновление прогресса
+                val elapsed = System.currentTimeMillis() - recordingStartTime
+                val fileProgress = ((elapsed.toFloat() / RECORDING_DURATION_MS) * 100).toInt()
+                updateNotification(fileProgress)
             }
         }
     }
@@ -329,48 +287,10 @@ class CameraService : LifecycleService() {
         }
     }
 
-    private fun checkStorageSpace(): Boolean {
-        try {
-            val stat = StatFs(Environment.getExternalStorageDirectory().path)
-            val freeBytes = stat.availableBlocksLong * stat.blockSizeLong
-            val freeMb = freeBytes / (1024 * 1024)
-
-            if (freeMb < 500) {
-                Handler(Looper.getMainLooper()).post {
-                    Toast.makeText(applicationContext, "КРИТИЧЕСКИ МАЛО ПАМЯТИ! Запись остановлена.", Toast.LENGTH_LONG).show()
-                }
-                return false
-            } else if (freeMb < 2000) {
-                Handler(Looper.getMainLooper()).post {
-                    Toast.makeText(applicationContext, "ВНИМАНИЕ: Память телефона почти заполнена!", Toast.LENGTH_SHORT).show()
-                }
-            }
-        } catch (_: Exception) {}
-        return true
-    }
-
-    private fun manageStorageSpace() {
-        try {
-            val limit = getSharedPreferences("DashcamPrefs", MODE_PRIVATE).getInt("max_loop_files", 6)
-
-            if (limit > 50) return
-
-            contentResolver.query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Video.Media._ID),
-                "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ? AND ${MediaStore.Video.Media.DISPLAY_NAME} LIKE ?",
-                arrayOf("%Movies/MyDashcam%", "BVR_PRO_%"), "${MediaStore.Video.Media.DATE_ADDED} ASC")?.use { c ->
-                var toDel = c.count - limit + 1
-                while (c.moveToNext() && toDel > 0) {
-                    contentResolver.delete(ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, c.getLong(0)), null, null)
-                    toDel--
-                }
-            }
-        } catch (_: Exception) {}
-    }
-
     private fun startHardwareLoop() {
         if (!isRecordingActive) return
 
-        if (!checkStorageSpace()) {
+        if (!StorageManager.checkStorageSpace(this)) {
             isRecordingActive = false
             recordingStartTime = 0L
             playStopSound()
@@ -379,7 +299,9 @@ class CameraService : LifecycleService() {
             return
         }
 
-        manageStorageSpace()
+        val limit = getSharedPreferences("DashcamPrefs", MODE_PRIVATE).getInt("max_loop_files", 6)
+        StorageManager.manageLoopStorage(this, limit)
+
         startHardware(isRecording = true)
         startDynamicUpdates()
         updateNotification()
@@ -588,7 +510,6 @@ class CameraService : LifecycleService() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        // ИСПРАВЛЕНИЕ: Если смахиваем приложение и запись не идет — отвязываем камеру, чтобы убрать зеленую точку!
         if (!isRecordingActive) {
             try { cameraProvider?.unbindAll() } catch(_: Exception) {}
         }

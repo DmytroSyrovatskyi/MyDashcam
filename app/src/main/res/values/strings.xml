@@ -53,5 +53,8 @@
     <string name="settings_pip_desc">Show mini-window when app is minimized</string>
     <string name="infinite_storage">INFINITE (No loop)</string>
 
+    <string name="toast_storage_critical">CRITICAL: Storage full! Recording stopped.</string>
+    <string name="toast_storage_warning">WARNING: Phone storage is almost full!</string>
+
 
 </resources>
