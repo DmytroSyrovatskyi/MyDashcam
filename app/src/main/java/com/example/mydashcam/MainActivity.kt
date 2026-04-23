@@ -4,10 +4,13 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.app.LocaleManager
+import android.app.PictureInPictureParams
 import android.content.*
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.database.ContentObserver
 import android.graphics.Matrix
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.hardware.camera2.CameraCharacteristics
 import android.media.MediaRecorder
@@ -16,9 +19,12 @@ import android.os.*
 import android.provider.MediaStore
 import android.text.SpannableString
 import android.text.style.StyleSpan
+import android.util.Rational
+import android.util.Size
 import android.view.*
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -57,9 +63,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnTabTemp: TextView
     private lateinit var btnTabSaved: TextView
     private lateinit var btnTabPreview: TextView
-    private lateinit var previewImageView: ImageView
+
+    private lateinit var controlCard: CardView
+    private lateinit var tabLayout: LinearLayout
+    private lateinit var previewImageView: TextureView
 
     private var cameraServiceBinder: CameraService.LocalBinder? = null
+    private var isFirstRunDialogOpen = false
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -67,35 +77,44 @@ class MainActivity : AppCompatActivity() {
 
             cameraServiceBinder?.setPreviewListener { bitmap, rotationDegrees ->
                 runOnUiThread {
-                    val viewWidth = previewImageView.width.toFloat()
-                    val viewHeight = previewImageView.height.toFloat()
+                    if (previewImageView.isAvailable) {
 
-                    if (viewWidth > 0 && viewHeight > 0) {
-                        val matrix = Matrix()
-                        val bw = bitmap.width.toFloat()
-                        val bh = bitmap.height.toFloat()
+                        updatePreviewRatio(rotationDegrees)
 
-                        matrix.postTranslate(-bw / 2f, -bh / 2f)
-                        matrix.postRotate(rotationDegrees.toFloat())
+                        val viewWidth = previewImageView.width.toFloat()
+                        val viewHeight = previewImageView.height.toFloat()
 
-                        val isPortrait = rotationDegrees % 180 != 0
-                        val rotatedW = if (isPortrait) bh else bw
-                        val rotatedH = if (isPortrait) bw else bh
+                        if (viewWidth > 0 && viewHeight > 0) {
+                            val canvas = previewImageView.lockCanvas()
+                            if (canvas != null) {
+                                canvas.drawColor(android.graphics.Color.BLACK)
 
-                        val scale = minOf(viewWidth / rotatedW, viewHeight / rotatedH)
-                        matrix.postScale(scale, scale)
+                                val matrix = Matrix()
+                                val bw = bitmap.width.toFloat()
+                                val bh = bitmap.height.toFloat()
 
-                        if (cameraServiceBinder?.isFrontCamera() == true) {
-                            matrix.postScale(-1f, 1f)
+                                matrix.postTranslate(-bw / 2f, -bh / 2f)
+                                matrix.postRotate(rotationDegrees.toFloat())
+
+                                val isPortrait = rotationDegrees % 180 != 0
+                                val rotatedW = if (isPortrait) bh else bw
+                                val rotatedH = if (isPortrait) bw else bh
+
+                                val scale = maxOf(viewWidth / rotatedW, viewHeight / rotatedH)
+                                matrix.postScale(scale, scale)
+
+                                if (cameraServiceBinder?.isFrontCamera() == true) {
+                                    matrix.postScale(-1f, 1f)
+                                }
+
+                                matrix.postTranslate(viewWidth / 2f, viewHeight / 2f)
+
+                                val paint = Paint().apply { isFilterBitmap = true }
+                                canvas.drawBitmap(bitmap, matrix, paint)
+
+                                previewImageView.unlockCanvasAndPost(canvas)
+                            }
                         }
-
-                        matrix.postTranslate(viewWidth / 2f, viewHeight / 2f)
-
-                        previewImageView.scaleType = ImageView.ScaleType.MATRIX
-                        previewImageView.imageMatrix = matrix
-                        previewImageView.setImageBitmap(bitmap)
-                    } else {
-                        previewImageView.setImageBitmap(bitmap)
                     }
                 }
             }
@@ -105,6 +124,18 @@ class MainActivity : AppCompatActivity() {
             cameraServiceBinder?.setPreviewListener(null)
             cameraServiceBinder = null
         }
+    }
+
+    private var lastKnownRotation = -1
+
+    private fun updatePreviewRatio(rotation: Int) {
+        if (lastKnownRotation == rotation) return
+        lastKnownRotation = rotation
+
+        val params = previewImageView.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+        val isPortrait = rotation % 180 != 0
+        params.dimensionRatio = if (isPortrait) "9:16" else "16:9"
+        previewImageView.layoutParams = params
     }
 
     private var currentTab = TabState.PREVIEW
@@ -122,12 +153,15 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
-        val lang = prefs.getString("app_lang", if (Locale.getDefault().language == "ru") "ru" else "en") ?: "en"
+        val lang = prefs.getString("app_lang", "en") ?: "en"
         setAppLocale(lang)
 
         setContentView(R.layout.activity_main)
 
+        controlCard = findViewById(R.id.controlCard)
+        tabLayout = findViewById(R.id.tabLayout)
         previewImageView = findViewById(R.id.previewImageView)
+
         btnToggleRecord = findViewById(R.id.btnToggleRecord)
         iconToggleRecord = findViewById(R.id.iconToggleRecord)
         btnLockFile = findViewById(R.id.btnLockFile)
@@ -148,7 +182,10 @@ class MainActivity : AppCompatActivity() {
         btnTabPreview.setOnClickListener { switchTab(TabState.PREVIEW) }
 
         btnToggleRecord.setOnClickListener {
-            if (!hasPermissions()) return@setOnClickListener
+            if (!hasPermissions()) {
+                Toast.makeText(this, getString(R.string.toast_perms_needed), Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
             try {
                 val intent = Intent(this, CameraService::class.java).apply {
                     action = if (CameraService.isRecordingActive) CameraService.ACTION_STOP else CameraService.ACTION_START
@@ -156,7 +193,7 @@ class MainActivity : AppCompatActivity() {
                 ContextCompat.startForegroundService(this, intent)
                 Handler(Looper.getMainLooper()).postDelayed({ updateUiState() }, 400)
             } catch (e: Exception) {
-                Toast.makeText(this, "Error starting record: ${e.message}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -179,19 +216,72 @@ class MainActivity : AppCompatActivity() {
         }
 
         requestAppPermissions()
+        handleAutoStartPip(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleAutoStartPip(intent)
+    }
+
+    // ИСПРАВЛЕНИЕ: Вычисляет правильную пропорцию для PiP-окна
+    private fun getPipRatio(): Rational {
+        val w = previewImageView.width
+        val h = previewImageView.height
+        if (w > 0 && h > 0) {
+            return Rational(w, h)
+        }
+        return Rational(16, 9)
+    }
+
+    private fun handleAutoStartPip(intent: Intent?) {
+        if (intent?.getBooleanExtra("auto_start_pip", false) == true) {
+            intent.removeExtra("auto_start_pip")
+            if (!CameraService.isRecordingActive && hasPermissions()) {
+                val serviceIntent = Intent(this, CameraService::class.java).apply { action = CameraService.ACTION_START }
+                ContextCompat.startForegroundService(this, serviceIntent)
+            }
+            Handler(Looper.getMainLooper()).postDelayed({
+                try {
+                    val params = PictureInPictureParams.Builder().setAspectRatio(getPipRatio()).build()
+                    enterPictureInPictureMode(params)
+                } catch (_: Exception) {}
+            }, 600)
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
+        if (CameraService.isRecordingActive && prefs.getBoolean("pref_pip", false)) {
+            val params = PictureInPictureParams.Builder()
+                .setAspectRatio(getPipRatio())
+                .build()
+            enterPictureInPictureMode(params)
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+
+        if (isInPictureInPictureMode) {
+            controlCard.visibility = View.GONE
+            tabLayout.visibility = View.GONE
+            recyclerView.visibility = View.GONE
+            previewImageView.visibility = View.VISIBLE
+        } else {
+            controlCard.visibility = View.VISIBLE
+            tabLayout.visibility = View.VISIBLE
+            switchTab(currentTab)
+            updateUiState()
+        }
     }
 
     private fun requestAppPermissions() {
-        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
-        } else {
-            arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.READ_MEDIA_VIDEO)
-        }
-
+        val permissions = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.READ_MEDIA_VIDEO, "android.permission.READ_MEDIA_VISUAL_USER_SELECTED")
         if (!hasPermissions()) {
             requestPermissions(permissions, 101)
-        } else {
-            checkFirstRun()
         }
     }
 
@@ -201,18 +291,26 @@ class MainActivity : AppCompatActivity() {
         return hasCam && hasMic
     }
 
-    private fun checkFirstRun() {
+    // ИСПРАВЛЕНИЕ: Гарантированный запуск диалога только когда UI готов
+    private fun checkFirstRunDialog() {
         val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
-        if (!prefs.contains("f_run")) {
-            prefs.edit { putBoolean("f_run", true) }
-            openSmartSettingsDialog()
+        if (!prefs.getBoolean("f_run", false) && !isFirstRunDialogOpen) {
+            isFirstRunDialogOpen = true
+            window.decorView.post {
+                if (!isFinishing && !isDestroyed) {
+                    openSmartSettingsDialog()
+                }
+            }
         }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (hasPermissions()) {
-            checkFirstRun()
+            checkFirstRunDialog()
+            try {
+                contentResolver.registerContentObserver(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, mediaStoreObserver)
+            } catch (_: Exception) {}
         }
     }
 
@@ -227,31 +325,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onStop() {
-        super.onStop()
-        cameraServiceBinder?.setPreviewListener(null)
-        try { unbindService(serviceConnection) } catch (_: Exception) {}
-        cameraServiceBinder = null
-
-        if (hasPermissions() && !CameraService.isRecordingActive) {
-            try {
-                val intent = Intent(this, CameraService::class.java).apply {
-                    action = CameraService.ACTION_PAUSE_PREVIEW
-                }
-                startService(intent)
-            } catch (_: Exception) {}
-        }
-    }
-
-    private fun setAppLocale(langCode: String) {
-        // Убрали проверку SDK_INT, так как проект >= 33
-        val lm = getSystemService(LocaleManager::class.java)
-        lm.applicationLocales = LocaleList(Locale.forLanguageTag(langCode))
-    }
-
     override fun onResume() {
         super.onResume()
-        contentResolver.registerContentObserver(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, mediaStoreObserver)
+        CameraService.isAppVisible = true
+
+        if (hasPermissions()) {
+            // Задержка на первый запуск, чтобы не блочило UI
+            Handler(Looper.getMainLooper()).postDelayed({
+                checkFirstRunDialog()
+            }, 500)
+
+            try {
+                contentResolver.registerContentObserver(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, mediaStoreObserver)
+            } catch (_: Exception) {}
+        }
+
         switchTab(currentTab)
         updateUiState()
 
@@ -268,7 +356,39 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        contentResolver.unregisterContentObserver(mediaStoreObserver)
+        try {
+            contentResolver.unregisterContentObserver(mediaStoreObserver)
+        } catch (_: Exception) {}
+    }
+
+    override fun onStop() {
+        super.onStop()
+
+        if (isInPictureInPictureMode) return
+
+        CameraService.isAppVisible = false
+        cameraServiceBinder?.setPreviewListener(null)
+        try { unbindService(serviceConnection) } catch (_: Exception) {}
+        cameraServiceBinder = null
+
+        if (hasPermissions() && !CameraService.isRecordingActive) {
+            try {
+                val intent = Intent(this, CameraService::class.java).apply {
+                    action = CameraService.ACTION_PAUSE_PREVIEW
+                }
+                startService(intent)
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun setAppLocale(langCode: String) {
+        try {
+            val lm = getSystemService(LocaleManager::class.java)
+            val currentLang = if (lm?.applicationLocales?.isEmpty == false) lm.applicationLocales[0].language else ""
+            if (currentLang != langCode) {
+                lm?.applicationLocales = LocaleList(Locale.forLanguageTag(langCode))
+            }
+        } catch (_: Exception) {}
     }
 
     private fun switchTab(tab: TabState) {
@@ -290,19 +410,18 @@ class MainActivity : AppCompatActivity() {
         } else {
             previewImageView.visibility = View.GONE
             recyclerView.visibility = View.VISIBLE
-            loadVideos()
+            if (hasPermissions()) loadVideos()
         }
     }
 
     @SuppressLint("SetTextI18n")
     private fun updateUiState() {
         val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
-        val isRu = Locale.getDefault().language == "ru"
 
         val cam = when(prefs.getString("pref_camera", "auto")) {
-            "front" -> if(isRu) "САЛОН" else "CABIN"
-            "back" -> if(isRu) "ОСНОВНАЯ" else "MAIN"
-            else -> if(isRu) "ШИРИК" else "WIDE"
+            "front" -> getString(R.string.cam_front)
+            "back" -> getString(R.string.cam_main)
+            else -> getString(R.string.cam_wide)
         }
         val res = prefs.getString("pref_resolution", "1080").let { if(it=="4k") "4K UHD" else "${it}p HD" }
         val fps = prefs.getInt("pref_fps", 30)
@@ -327,10 +446,14 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("SetTextI18n", "UnsafeOptInUsageError")
     private fun openSmartSettingsDialog() {
+        isFirstRunDialogOpen = true
         val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
         var cCam = prefs.getString("pref_camera", "auto") ?: "auto"
         var cFiles = prefs.getInt("max_loop_files", 6)
         val cLang = prefs.getString("app_lang", "en") ?: "en"
+        var cCodec = prefs.getString("pref_codec", "auto") ?: "auto"
+
+        val isFirstRun = !prefs.getBoolean("f_run", false)
 
         ProcessCameraProvider.getInstance(this).addListener({
             val provider = ProcessCameraProvider.getInstance(this).get()
@@ -356,6 +479,10 @@ class MainActivity : AppCompatActivity() {
             val rbEn = RadioButton(this).apply { text = "EN" }
             rgL.addView(rbRu); rgL.addView(rbEn); if(cLang == "ru") rbRu.isChecked = true else rbEn.isChecked = true
             layout.addView(rgL)
+
+            addHeader(getString(R.string.settings_pip))
+            val swPip = SwitchCompat(this).apply { text = getString(R.string.settings_pip_desc); isChecked = prefs.getBoolean("pref_pip", false) }
+            layout.addView(swPip)
 
             addHeader(if(cLang == "ru") "Объектив" else "Camera Lens")
             val rgC = RadioGroup(this).apply { orientation = LinearLayout.VERTICAL }
@@ -385,10 +512,19 @@ class MainActivity : AppCompatActivity() {
             if(prefs.getInt("pref_fps", 30) == 60) rb6.isChecked = true else rb3.isChecked = true
             layout.addView(rgF)
 
+            addHeader(if(cLang == "ru") "Формат видео (Кодек)" else "Video Codec")
+            val rgCodec = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
+            val rbCodecAuto = RadioButton(this).apply { text = if(cLang == "ru") "АВТО (HEVC -> H.264)" else "AUTO (HEVC -> H.264)" }
+            val rbCodecHevc = RadioButton(this).apply { text = if(cLang == "ru") "HEVC / H.265 (Экономичный)" else "HEVC / H.265 (High Efficiency)" }
+            val rbCodecAvc = RadioButton(this).apply { text = if(cLang == "ru") "AVC / H.264 (Совместимый)" else "AVC / H.264 (Compatible)" }
+            rgCodec.addView(rbCodecAuto); rgCodec.addView(rbCodecHevc); rgCodec.addView(rbCodecAvc)
+            when(cCodec) { "hevc" -> rbCodecHevc.isChecked = true; "avc" -> rbCodecAvc.isChecked = true; else -> rbCodecAuto.isChecked = true }
+            layout.addView(rgCodec)
+
             addHeader(if(cLang == "ru") "Лимит памяти" else "Storage Limit")
             val loopL = TextView(this).apply { textSize = 15f; setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_active)) }
             val cycleI = TextView(this).apply { text = "⏱ 1 cycle = 10 minutes"; textSize = 12f; setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_inactive)); setPadding(0,4,0,16) }
-            val seek = SeekBar(this).apply { max = 17; progress = cFiles - 3 }
+            val seek = SeekBar(this).apply { max = 18; progress = if(cFiles > 50) 18 else cFiles - 3 }
             val storL = TextView(this).apply { textSize = 14f; setTypeface(null, Typeface.BOLD); setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_active)); setPadding(0,16,0,0) }
 
             fun refresh() {
@@ -407,16 +543,27 @@ class MainActivity : AppCompatActivity() {
                 if(!s6 && rb6.isChecked) rb3.isChecked = true
 
                 val mult = (if(rb4.isChecked) 2.8 else if(rb7.isChecked) 0.6 else 1.0) * (if(rb6.isChecked) 1.6 else 1.0)
-                storL.text = String.format(Locale.US, if(rbRu.isChecked) "Объем цикла: %.1f ГБ" else "Estimated loop: %.1f GB", cFiles * 1.5 * mult)
-                loopL.text = if(rbRu.isChecked) "Файлов в цикле: $cFiles" else "Files in loop: $cFiles"
+                val codecMult = if(rbCodecHevc.isChecked) 0.7 else 1.0
+
+                if (cFiles > 50) {
+                    storL.text = getString(R.string.infinite_storage)
+                    loopL.text = if(rbRu.isChecked) "Перезапись: ВЫКЛ" else "Loop Record: OFF"
+                } else {
+                    storL.text = String.format(Locale.US, if(rbRu.isChecked) "Объем цикла: %.1f ГБ" else "Estimated loop: %.1f GB", cFiles * 1.5 * mult * codecMult)
+                    loopL.text = if(rbRu.isChecked) "Файлов в цикле: $cFiles" else "Files in loop: $cFiles"
+                }
             }
 
             refresh()
             rgC.setOnCheckedChangeListener { _, id -> cCam = when(id){rbF.id->"front";rbB.id->"back";else->"auto"}; refresh() }
             rgR.setOnCheckedChangeListener { _, _ -> refresh() }
             rgF.setOnCheckedChangeListener { _, _ -> refresh() }
+            rgCodec.setOnCheckedChangeListener { _, id -> cCodec = when(id){rbCodecHevc.id->"hevc";rbCodecAvc.id->"avc";else->"auto"}; refresh() }
             seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) { cFiles = p + 3; refresh() }
+                override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) {
+                    cFiles = if (p == 18) 999 else p + 3
+                    refresh()
+                }
                 override fun onStartTrackingTouch(s: SeekBar?) {}
                 override fun onStopTrackingTouch(s: SeekBar?) {}
             })
@@ -424,22 +571,28 @@ class MainActivity : AppCompatActivity() {
             layout.addView(loopL); layout.addView(cycleI); layout.addView(seek); layout.addView(storL)
             scroll.addView(layout)
 
-            AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            val dialogBuilder = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle(getString(R.string.settings_title))
                 .setView(scroll)
+                .setCancelable(!isFirstRun)
+                .setOnDismissListener { isFirstRunDialogOpen = false }
                 .setPositiveButton(getString(R.string.btn_save_config)) { _, _ ->
                     val sR = if(rb4.isChecked)"4k" else if(rb7.isChecked)"720" else "1080"
                     val sL = if(rbRu.isChecked) "ru" else "en"
+
                     prefs.edit {
+                        putBoolean("f_run", true)
                         putString("app_lang", sL)
+                        putBoolean("pref_pip", swPip.isChecked)
                         putString("pref_camera", cCam)
                         putString("pref_resolution", sR)
                         putInt("pref_fps", if(rb6.isChecked)60 else 30)
                         putInt("max_loop_files", cFiles)
+                        putString("pref_codec", cCodec)
                     }
+
                     if (sL != cLang) {
                         setAppLocale(sL)
-                        recreate()
                     } else {
                         updateUiState()
                         if (hasPermissions() && !CameraService.isRecordingActive) {
@@ -449,7 +602,13 @@ class MainActivity : AppCompatActivity() {
                             } catch (_: Exception) {}
                         }
                     }
-                }.show()
+                }
+
+            if (!isFirstRun) {
+                dialogBuilder.setNegativeButton(getString(R.string.btn_cancel), null)
+            }
+
+            dialogBuilder.show()
         }, ContextCompat.getMainExecutor(this))
     }
 
@@ -479,6 +638,7 @@ class MainActivity : AppCompatActivity() {
 
     inner class VideoAdapter : RecyclerView.Adapter<VideoAdapter.VideoViewHolder>() {
         inner class VideoViewHolder(v: View) : RecyclerView.ViewHolder(v) {
+            val img: ImageView? = v.findViewById(R.id.imgThumbnail)
             val tD: TextView = v.findViewById(R.id.textVideoDate)
             val tI: TextView = v.findViewById(R.id.textVideoInfo)
             val bL: ImageButton = v.findViewById(R.id.btnLockUnlock)
@@ -496,6 +656,7 @@ class MainActivity : AppCompatActivity() {
 
             val sz = if (v.size > 1073741824) String.format(Locale.US, "%.2f GB", v.size / 1073741824.0) else "${v.size / 1048576} MB"
             val durationMin = (v.duration / 60000).toInt()
+
             h.tI.text = context.getString(R.string.video_info_format, durationMin, sz)
 
             h.bL.setImageResource(if (v.isLocked) android.R.drawable.ic_menu_revert else android.R.drawable.ic_menu_save)
@@ -510,6 +671,16 @@ class MainActivity : AppCompatActivity() {
                     .setPositiveButton(getString(R.string.btn_delete)) { _, _ -> contentResolver.delete(v.uri, null, null) }
                     .setNegativeButton(getString(R.string.btn_cancel), null).show()
             }
+
+            h.img?.let { imageView ->
+                try {
+                    val thumbnail = contentResolver.loadThumbnail(v.uri, Size(256, 256), null)
+                    imageView.setImageBitmap(thumbnail)
+                } catch (_: Exception) {
+                    imageView.setImageDrawable(null)
+                }
+            }
+
             h.itemView.setOnClickListener {
                 startActivity(Intent(Intent.ACTION_VIEW).apply { setDataAndType(v.uri, "video/mp4"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) })
             }

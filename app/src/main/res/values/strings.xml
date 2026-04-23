@@ -46,4 +46,12 @@
     <string name="desc_camera_preview">Camera Live Preview</string>
 
     <string name="tab_preview">PREVIEW</string>
+
+    <string name="toast_camera_unsupported">Error: Camera does not support %1$s@%2$dfps. Please lower the settings!</string>
+
+    <string name="settings_pip">Enable Picture-in-Picture</string>
+    <string name="settings_pip_desc">Show mini-window when app is minimized</string>
+    <string name="infinite_storage">INFINITE (No loop)</string>
+
+
 </resources>

@@ -8,15 +8,30 @@
     android:padding="16dp"
     android:layout_marginBottom="8dp"
     android:background="#121212"
-    android:gravity="center_vertical"
-    tools:ignore="SpeakableTextPresentCheck,ImageContrastCheck,TouchTargetSizeCheck,ContentDescription,TextContrastCheck">
+    android:gravity="center_vertical">
 
-    <ImageView
-        android:layout_width="36dp"
-        android:layout_height="36dp"
-        android:src="@android:drawable/ic_media_play"
-        android:contentDescription="@null"
-        app:tint="#00E676" />
+    <androidx.cardview.widget.CardView
+        android:layout_width="60dp"
+        android:layout_height="45dp"
+        app:cardCornerRadius="6dp"
+        app:cardElevation="0dp"
+        app:cardBackgroundColor="#222222">
+
+        <ImageView
+            android:id="@+id/imgThumbnail"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:importantForAccessibility="no"
+            android:scaleType="centerCrop" />
+
+        <ImageView
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@android:drawable/ic_media_play"
+            android:layout_gravity="center"
+            android:importantForAccessibility="no"
+            app:tint="#CC00E676" />
+    </androidx.cardview.widget.CardView>
 
     <LinearLayout
         android:layout_width="0dp"
@@ -46,20 +61,21 @@
 
     <ImageButton
         android:id="@+id/btnLockUnlock"
-        android:layout_width="44dp"
-        android:layout_height="44dp"
-        android:background="@android:color/transparent"
-        android:contentDescription="@null"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/desc_lock_file"
         app:tint="#FFC107"
         android:src="@android:drawable/ic_menu_save" />
 
     <ImageButton
         android:id="@+id/btnDelete"
-        android:layout_width="44dp"
-        android:layout_height="44dp"
-        android:background="@android:color/transparent"
-        android:contentDescription="@null"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/btn_delete"
         app:tint="#FF1744"
+        tools:ignore="ImageContrastCheck"
         android:src="@android:drawable/ic_menu_delete" />
 
 </LinearLayout>

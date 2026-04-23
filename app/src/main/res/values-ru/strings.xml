@@ -46,4 +46,10 @@
     <string name="desc_camera_preview">Превью камеры</string>
 
     <string name="tab_preview">ПРЕВЬЮ</string>
+
+    <string name="toast_camera_unsupported">Ошибка: камера не тянет %1$s@%2$dfps. Снизьте настройки!</string>
+
+    <string name="settings_pip">Режим «Окно в окне»</string>
+    <string name="settings_pip_desc">Показывать мини-плеер при сворачивании</string>
+    <string name="infinite_storage">БЕЗЛИМИТ (Без перезаписи)</string>
 </resources>
