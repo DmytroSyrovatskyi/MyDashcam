@@ -133,7 +133,7 @@ class CameraService : LifecycleService() {
         }
     }
 
-    // НОВОЕ: Слушатель GPS (через лямбду, как просила Студия)
+    // Слушатель GPS через лямбду
     private val locationListener = LocationListener { location ->
         currentSpeedKmH = if (location.hasSpeed()) location.speed * 3.6f else 0f
         currentLat = location.latitude
@@ -387,7 +387,12 @@ class CameraService : LifecycleService() {
                 val chars = Camera2CameraInfo.from(target).getCameraCharacteristic(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
                 val sizes = chars?.getOutputSizes(MediaRecorder::class.java) ?: emptyArray()
                 val reqW = if(prefResolution == "4k") 3840 else if(prefResolution == "720") 1280 else 1920
-                val bestSize = sizes.filter { it.width >= reqW }.minByOrNull { it.width } ?: sizes.maxByOrNull { it.width } ?: Size(1920, 1080)
+
+                // ИСПРАВЛЕНО: Жесткий фильтр соотношения сторон 16:9 (избегаем 4:3, как в логе 1920x1440)
+                val bestSize = sizes
+                    .filter { it.width >= reqW && kotlin.math.abs(it.width.toFloat() / it.height.toFloat() - 16f/9f) < 0.1f }
+                    .minByOrNull { it.width }
+                    ?: Size(reqW, if(reqW == 3840) 2160 else if(reqW == 1280) 720 else 1080)
 
                 val ranges = Camera2CameraInfo.from(target).getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
                 val bestRange = ranges?.firstOrNull { it.upper == prefFps && it.lower == prefFps } ?: ranges?.firstOrNull { it.upper == prefFps } ?: Range(30, 30)
@@ -488,7 +493,13 @@ class CameraService : LifecycleService() {
                 setVideoSource(MediaRecorder.VideoSource.SURFACE)
                 setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                 setVideoEncoder(if (prefCodec == "hevc" || prefCodec == "auto") MediaRecorder.VideoEncoder.HEVC else MediaRecorder.VideoEncoder.H264)
+
+                // ИСПРАВЛЕНО: Восстанавливаем качество звука
                 setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setAudioChannels(1) // Моно
+                setAudioSamplingRate(48000) // 48 kHz
+                setAudioEncodingBitRate(128000) // 128 kbps
+
                 setVideoEncodingBitRate(nextTargetBitrate)
                 setVideoFrameRate(prefFps)
                 setVideoSize(w, h)
