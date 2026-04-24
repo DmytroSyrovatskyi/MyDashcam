@@ -1,8 +1,11 @@
 package com.example.mydashcam
 
 import android.annotation.SuppressLint
+import android.content.BroadcastReceiver
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.hardware.camera2.*
@@ -93,12 +96,44 @@ class CameraService : LifecycleService() {
         const val RECORDING_DURATION_MS = 600000L
     }
 
+    private val powerReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
+            if (!prefs.getBoolean("pref_autostart", false)) return
+
+            when (intent?.action) {
+                Intent.ACTION_POWER_CONNECTED -> {
+                    if (!isRecordingActive) {
+                        Toast.makeText(this@CameraService, "Auto-Start: Power Connected", Toast.LENGTH_SHORT).show()
+                        startService(Intent(this@CameraService, CameraService::class.java).apply { action = ACTION_START })
+                    }
+                }
+                Intent.ACTION_POWER_DISCONNECTED -> {
+                    if (isRecordingActive) {
+                        Toast.makeText(this@CameraService, "Auto-Stop: Power Disconnected", Toast.LENGTH_SHORT).show()
+                        startService(Intent(this@CameraService, CameraService::class.java).apply { action = ACTION_STOP })
+                    }
+                }
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         powerManager = getSystemService(POWER_SERVICE) as PowerManager
         setupThermalListener()
         setupOrientationListener()
 
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_POWER_CONNECTED)
+            addAction(Intent.ACTION_POWER_DISCONNECTED)
+        }
+        registerReceiver(powerReceiver, filter)
+
+        loadPrefs()
+    }
+
+    private fun loadPrefs() {
         val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
         prefCameraType = prefs.getString("pref_camera", "auto") ?: "auto"
         prefResolution = prefs.getString("pref_resolution", "1080") ?: "1080"
@@ -136,7 +171,6 @@ class CameraService : LifecycleService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
-
         updateNotification()
 
         when (intent?.action) {
@@ -144,12 +178,7 @@ class CameraService : LifecycleService() {
                 isRecordingActive = true
                 isoEma = minHardwareIso
                 recordingStartTime = System.currentTimeMillis()
-
-                val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
-                prefCameraType = prefs.getString("pref_camera", "auto") ?: "auto"
-                prefResolution = prefs.getString("pref_resolution", "1080") ?: "1080"
-                prefFps = prefs.getInt("pref_fps", 30)
-                prefCodec = prefs.getString("pref_codec", "auto") ?: "auto"
+                loadPrefs()
                 startHardwareLoop()
             }
             ACTION_STOP -> if (isRecordingActive) {
@@ -158,16 +187,11 @@ class CameraService : LifecycleService() {
                 playStopSound()
                 stopHardware()
                 updateNotification()
-                if (isAppVisible) {
-                    startHardware(isRecording = false)
-                }
+                if (isAppVisible) startHardware(isRecording = false)
             }
             ACTION_LOCK -> executeLock()
             ACTION_EXIT -> {
-                if (isRecordingActive) {
-                    isRecordingActive = false
-                    stopHardware()
-                }
+                if (isRecordingActive) { isRecordingActive = false; stopHardware() }
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 Process.killProcess(Process.myPid())
@@ -175,10 +199,7 @@ class CameraService : LifecycleService() {
             }
             ACTION_STANDBY -> {
                 if (!isRecordingActive && isAppVisible) {
-                    val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
-                    prefCameraType = prefs.getString("pref_camera", "auto") ?: "auto"
-                    prefResolution = prefs.getString("pref_resolution", "1080") ?: "1080"
-                    prefFps = prefs.getInt("pref_fps", 30)
+                    loadPrefs()
                     startHardware(isRecording = false)
                 }
             }
@@ -224,7 +245,6 @@ class CameraService : LifecycleService() {
             while (isRecordingActive) {
                 delay(1000)
 
-                // 1. Умная коррекция экспозиции
                 val darkness = ((isoEma - minHardwareIso) / (maxHardwareIso - minHardwareIso)).coerceIn(0f, 1f)
                 val targetEV = 0.0f - (1.5f * darkness)
                 currEv = (targetEV * 0.05f) + (currEv * 0.95f)
@@ -235,14 +255,12 @@ class CameraService : LifecycleService() {
                     cameraControl?.setExposureCompensationIndex(idx)
                 }
 
-                // 2. Расчет битрейта
                 val codecMult = if (prefCodec == "hevc" || prefCodec == "auto") 0.7f else 1.0f
-                val resMult = if(prefResolution == "4k") 2.5f else 1.0f
-                val fpsMult = if(prefFps == 60) 1.5f else 1.0f
-                val baseBitrate = (16_000_000f + (12_000_000f * darkness)) * resMult * fpsMult * codecMult
+                val resMult = if(prefResolution == "4k") 3.0f else if(prefResolution == "720") 0.6f else 1.0f
+                val fpsMult = if(prefFps >= 60) 1.6f else 1.0f
+                val baseBitrate = (15_000_000f + (8_000_000f * darkness)) * resMult * fpsMult * codecMult
                 nextTargetBitrate = if (isThermalDowngradeActive) (baseBitrate * 0.7f).toInt() else baseBitrate.toInt()
 
-                // 3. Обновление прогресса
                 val elapsed = System.currentTimeMillis() - recordingStartTime
                 val fileProgress = ((elapsed.toFloat() / RECORDING_DURATION_MS) * 100).toInt()
                 updateNotification(fileProgress)
@@ -250,31 +268,8 @@ class CameraService : LifecycleService() {
         }
     }
 
-    private fun playStartSound() {
-        try {
-            val mp = MediaPlayer.create(this, R.raw.s25_ultra_notification)
-            val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
-            val speakers = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-            speakers.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }?.let { speaker ->
-                mp.setPreferredDevice(speaker)
-            }
-            mp.start()
-            mp.setOnCompletionListener { it.release() }
-        } catch(_: Exception) {}
-    }
-
-    private fun playStopSound() {
-        try {
-            val mp = MediaPlayer.create(this, R.raw.alpha)
-            val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
-            val speakers = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-            speakers.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }?.let { speaker ->
-                mp.setPreferredDevice(speaker)
-            }
-            mp.start()
-            mp.setOnCompletionListener { it.release() }
-        } catch(_: Exception) {}
-    }
+    private fun playStartSound() { try { MediaPlayer.create(this, R.raw.s25_ultra_notification).start() } catch(_: Exception) {} }
+    private fun playStopSound() { try { MediaPlayer.create(this, R.raw.alpha).start() } catch(_: Exception) {} }
 
     private fun executeLock() {
         val uri = currentVideoUri
@@ -291,12 +286,7 @@ class CameraService : LifecycleService() {
         if (!isRecordingActive) return
 
         if (!StorageManager.checkStorageSpace(this)) {
-            isRecordingActive = false
-            recordingStartTime = 0L
-            playStopSound()
-            stopHardware()
-            updateNotification()
-            return
+            isRecordingActive = false; recordingStartTime = 0L; playStopSound(); stopHardware(); updateNotification(); return
         }
 
         val limit = getSharedPreferences("DashcamPrefs", MODE_PRIVATE).getInt("max_loop_files", 6)
@@ -315,136 +305,53 @@ class CameraService : LifecycleService() {
         }
     }
 
-    @SuppressLint("MissingPermission")
+    @SuppressLint("MissingPermission", "UnsafeOptInUsageError")
     private fun startHardware(isRecording: Boolean) {
         try {
             cameraProvider?.unbindAll()
-
-            val w = if(prefResolution == "4k") 3840 else if(prefResolution == "720") 1280 else 1920
-            val h = if(prefResolution == "4k") 2160 else if(prefResolution == "720") 720 else 1080
-
-            if (isRecording) {
-                try {
-                    currentVideoName = "BVR_PRO_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(System.currentTimeMillis())}.mp4"
-                    currentVideoUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
-                        put(MediaStore.Video.Media.DISPLAY_NAME, currentVideoName)
-                        put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/MyDashcam")
-                    })
-
-                    if (currentVideoUri == null) throw Exception("Media URI is null")
-
-                    pfd = contentResolver.openFileDescriptor(currentVideoUri!!, "rw") ?: throw Exception("PFD is null")
-
-                    mediaRecorder = MediaRecorder(this).apply {
-                        setAudioSource(MediaRecorder.AudioSource.MIC)
-                        setVideoSource(MediaRecorder.VideoSource.SURFACE)
-                        setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-
-                        if (prefCodec == "hevc" || prefCodec == "auto") {
-                            setVideoEncoder(MediaRecorder.VideoEncoder.HEVC)
-                        } else {
-                            setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-                        }
-
-                        setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                        setVideoEncodingBitRate(nextTargetBitrate)
-                        setVideoFrameRate(prefFps)
-                        setVideoSize(w, h)
-                        setAudioChannels(1)
-                        setAudioSamplingRate(48000)
-                        setAudioEncodingBitRate(128000)
-                        setOutputFile(pfd!!.fileDescriptor)
-
-                        val mics = (getSystemService(AUDIO_SERVICE) as AudioManager).getDevices(AudioManager.GET_DEVICES_INPUTS)
-                        mics.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }?.let { setPreferredDevice(it) }
-
-                        try {
-                            prepare()
-                        } catch(_: Exception) {
-                            try {
-                                reset()
-                                setAudioSource(MediaRecorder.AudioSource.MIC)
-                                setVideoSource(MediaRecorder.VideoSource.SURFACE)
-                                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                                setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-                                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                                setVideoEncodingBitRate(nextTargetBitrate)
-                                setVideoFrameRate(prefFps)
-                                setVideoSize(w, h)
-                                setAudioChannels(1)
-                                setAudioSamplingRate(48000)
-                                setAudioEncodingBitRate(128000)
-                                setOutputFile(pfd!!.fileDescriptor)
-                                val micsFallback = (getSystemService(AUDIO_SERVICE) as AudioManager).getDevices(AudioManager.GET_DEVICES_INPUTS)
-                                micsFallback.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }?.let { setPreferredDevice(it) }
-                                prepare()
-                            } catch (_: Exception) {
-                                Handler(Looper.getMainLooper()).post {
-                                    Toast.makeText(
-                                        applicationContext,
-                                        applicationContext.getString(R.string.toast_camera_unsupported, prefResolution, prefFps),
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                }
-                                isRecordingActive = false
-                                recordingStartTime = 0L
-                                stopHardware()
-                                updateNotification()
-                                return
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    Handler(Looper.getMainLooper()).post {
-                        Toast.makeText(applicationContext, "Error: ${e.message}", Toast.LENGTH_LONG).show()
-                    }
-                    isRecordingActive = false
-                    recordingStartTime = 0L
-                    stopHardware()
-                    updateNotification()
-                    return
-                }
-            }
-
             ProcessCameraProvider.getInstance(this).addListener({
                 val provider = ProcessCameraProvider.getInstance(this).get()
                 cameraProvider = provider
+
                 val all = provider.availableCameraInfos
                 val target = when(prefCameraType) {
                     "front" -> all.firstOrNull { it.lensFacing == CameraSelector.LENS_FACING_FRONT }
                     "back" -> all.filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }.maxByOrNull { Camera2CameraInfo.from(it).getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull() ?: 0f }
                     else -> all.filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }.minByOrNull { Camera2CameraInfo.from(it).getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull() ?: Float.MAX_VALUE }
-                } ?: all.firstOrNull { it.lensFacing == CameraSelector.LENS_FACING_BACK }
+                } ?: all.firstOrNull { it.lensFacing == CameraSelector.LENS_FACING_BACK } ?: return@addListener
 
-                val sensorOri = Camera2CameraInfo.from(target!!).getCameraCharacteristic(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+                val chars = Camera2CameraInfo.from(target).getCameraCharacteristic(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                val sizes = chars?.getOutputSizes(MediaRecorder::class.java) ?: emptyArray()
+                val reqW = if(prefResolution == "4k") 3840 else if(prefResolution == "720") 1280 else 1920
+                val bestSize = sizes.filter { it.width >= reqW }.minByOrNull { it.width } ?: sizes.maxByOrNull { it.width } ?: Size(1920, 1080)
+
+                val ranges = Camera2CameraInfo.from(target).getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+                val bestRange = ranges?.firstOrNull { it.upper == prefFps && it.lower == prefFps } ?: ranges?.firstOrNull { it.upper == prefFps } ?: Range(30, 30)
+
+                val sensorOri = Camera2CameraInfo.from(target).getCameraCharacteristic(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
                 val rot = (sensorOri + (if (target.lensFacing == CameraSelector.LENS_FACING_FRONT) -deviceOrientationAngle else deviceOrientationAngle) + 360) % 360
 
-                var recordPreview: Preview? = null
-                if (isRecording && mediaRecorder != null) {
-                    mediaRecorder?.setOrientationHint(rot)
-                    val selector = ResolutionSelector.Builder()
-                        .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
-                        .setResolutionStrategy(ResolutionStrategy(Size(w, h), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
-                        .build()
-                    val recordPreviewBuilder = Preview.Builder().setResolutionSelector(selector)
-                    val extender = Camera2Interop.Extender(recordPreviewBuilder)
+                if (isRecording) {
+                    setupRecorder(bestSize.width, bestSize.height, rot)
+                }
 
+                val selector = ResolutionSelector.Builder()
+                    .setResolutionStrategy(ResolutionStrategy(bestSize, ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
+                    .build()
+
+                val recordPreview = Preview.Builder().setResolutionSelector(selector).let { builder ->
+                    val extender = Camera2Interop.Extender(builder)
+                    extender.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, bestRange)
+                    extender.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
                     extender.setSessionCaptureCallback(object : CameraCaptureSession.CaptureCallback() {
-                        override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-                            result.get(CaptureResult.SENSOR_SENSITIVITY)?.let { iso ->
-                                isoEma = (iso * 0.15f) + (isoEma * 0.85f)
-                            }
+                        override fun onCaptureCompleted(s: CameraCaptureSession, req: CaptureRequest, res: TotalCaptureResult) {
+                            res.get(CaptureResult.SENSOR_SENSITIVITY)?.let { iso -> isoEma = (iso * 0.15f) + (isoEma * 0.85f) }
                         }
                     })
+                    builder.build()
+                }
 
-                    val ranges = Camera2CameraInfo.from(target).getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
-                    val bestRange = ranges?.firstOrNull { it.upper == prefFps && it.lower == prefFps } ?: ranges?.firstOrNull { it.upper == prefFps } ?: Range(30, 30)
-
-                    extender.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, bestRange)
-                    extender.setCaptureRequestOption(CaptureRequest.CONTROL_CAPTURE_INTENT, CaptureRequest.CONTROL_CAPTURE_INTENT_VIDEO_RECORD)
-                    extender.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
-
-                    recordPreview = recordPreviewBuilder.build()
+                if (isRecording && mediaRecorder != null) {
                     recordPreview.setSurfaceProvider(ContextCompat.getMainExecutor(this)) { request ->
                         request.provideSurface(mediaRecorder!!.surface, ContextCompat.getMainExecutor(this)) {}
                     }
@@ -454,43 +361,67 @@ class CameraService : LifecycleService() {
                     .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
                     .setResolutionStrategy(ResolutionStrategy(Size(1920, 1080), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
                     .build()
+
                 val imageAnalysis = ImageAnalysis.Builder()
                     .setResolutionSelector(analysisSelector)
                     .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .build()
-
-                imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(this)) { imageProxy ->
-                    if (previewCallback != null) {
-                        if (reusableBitmap == null || reusableBitmap!!.width != imageProxy.width || reusableBitmap!!.height != imageProxy.height) {
-                            reusableBitmap = createBitmap(imageProxy.width, imageProxy.height)
+                    .build().apply {
+                        setAnalyzer(ContextCompat.getMainExecutor(this@CameraService)) { imageProxy ->
+                            if (previewCallback != null) {
+                                if (reusableBitmap == null || reusableBitmap!!.width != imageProxy.width) {
+                                    reusableBitmap = createBitmap(imageProxy.width, imageProxy.height)
+                                }
+                                imageProxy.planes[0].buffer.rewind()
+                                reusableBitmap!!.copyPixelsFromBuffer(imageProxy.planes[0].buffer)
+                                previewCallback?.invoke(reusableBitmap!!, imageProxy.imageInfo.rotationDegrees)
+                            }
+                            imageProxy.close()
                         }
-                        imageProxy.planes[0].buffer.rewind()
-                        reusableBitmap!!.copyPixelsFromBuffer(imageProxy.planes[0].buffer)
-                        previewCallback?.invoke(reusableBitmap!!, imageProxy.imageInfo.rotationDegrees)
                     }
-                    imageProxy.close()
-                }
 
                 try {
                     provider.unbindAll()
-
                     val useCases = mutableListOf<UseCase>(imageAnalysis)
-                    if (isRecording && recordPreview != null) {
-                        useCases.add(recordPreview)
-                    }
-
+                    // Убрана лишняя проверка на != null
+                    if (isRecording) useCases.add(recordPreview)
                     val cam = provider.bindToLifecycle(this, CameraSelector.Builder().addCameraFilter { _ -> listOf(target) }.build(), *useCases.toTypedArray())
                     cameraControl = cam.cameraControl
                     cameraInfo = cam.cameraInfo
-
-                    if (isRecording) {
-                        mediaRecorder?.start()
-                        playStartSound()
-                    }
+                    if (isRecording) { mediaRecorder?.start(); playStartSound() }
                 } catch (_: Exception) {}
             }, ContextCompat.getMainExecutor(this))
         } catch (_: Exception) {}
+    }
+
+    private fun setupRecorder(w: Int, h: Int, rot: Int) {
+        try {
+            currentVideoName = "BVR_PRO_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(System.currentTimeMillis())}.mp4"
+            currentVideoUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
+                put(MediaStore.Video.Media.DISPLAY_NAME, currentVideoName)
+                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/MyDashcam")
+            })
+
+            pfd = contentResolver.openFileDescriptor(currentVideoUri!!, "rw")
+
+            mediaRecorder = MediaRecorder(this).apply {
+                setAudioSource(MediaRecorder.AudioSource.MIC)
+                setVideoSource(MediaRecorder.VideoSource.SURFACE)
+                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                setVideoEncoder(if (prefCodec == "hevc" || prefCodec == "auto") MediaRecorder.VideoEncoder.HEVC else MediaRecorder.VideoEncoder.H264)
+                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setVideoEncodingBitRate(nextTargetBitrate)
+                setVideoFrameRate(prefFps)
+                setVideoSize(w, h)
+                setOrientationHint(rot)
+                setOutputFile(pfd!!.fileDescriptor)
+                prepare()
+            }
+            // Заменено 'e' на '_'
+        } catch (_: Exception) {
+            isRecordingActive = false
+            stopHardware()
+        }
     }
 
     private fun stopHardware() {
@@ -516,6 +447,7 @@ class CameraService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        try { unregisterReceiver(powerReceiver) } catch (_: Exception) {}
         orientationEventListener?.disable()
         thermalListener?.let { powerManager?.removeThermalStatusListener(it) }
         isRecordingActive = false

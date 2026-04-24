@@ -40,18 +40,10 @@ import java.util.Date
 import java.util.Locale
 
 data class VideoItem(
-    val id: Long,
-    val name: String,
-    val size: Long,
-    val duration: Long,
-    val dateAdded: Long,
-    val uri: Uri,
-    val isLocked: Boolean
+    val id: Long, val name: String, val size: Long, val duration: Long, val dateAdded: Long, val uri: Uri, val isLocked: Boolean
 )
 
-enum class TabState {
-    TIMELINE, PROTECTED, PREVIEW
-}
+enum class TabState { TIMELINE, PROTECTED, PREVIEW }
 
 class MainActivity : AppCompatActivity() {
 
@@ -77,7 +69,6 @@ class MainActivity : AppCompatActivity() {
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             cameraServiceBinder = service as CameraService.LocalBinder
-
             cameraServiceBinder?.setPreviewListener { bitmap, rotationDegrees ->
                 runOnUiThread {
                     if (previewImageView.isAvailable) {
@@ -86,36 +77,32 @@ class MainActivity : AppCompatActivity() {
                         val viewHeight = previewImageView.height.toFloat()
 
                         if (viewWidth > 0 && viewHeight > 0) {
-                            val canvas = previewImageView.lockCanvas()
-                            if (canvas != null) {
-                                canvas.drawColor(android.graphics.Color.BLACK)
-                                val matrix = Matrix()
-                                val bw = bitmap.width.toFloat()
-                                val bh = bitmap.height.toFloat()
+                            val canvas = previewImageView.lockCanvas() ?: return@runOnUiThread
+                            canvas.drawColor(android.graphics.Color.BLACK)
+                            val matrix = Matrix()
+                            val bw = bitmap.width.toFloat()
+                            val bh = bitmap.height.toFloat()
 
-                                matrix.postTranslate(-bw / 2f, -bh / 2f)
-                                matrix.postRotate(rotationDegrees.toFloat())
+                            matrix.postTranslate(-bw / 2f, -bh / 2f)
+                            matrix.postRotate(rotationDegrees.toFloat())
 
-                                val isPortrait = rotationDegrees % 180 != 0
-                                val rotatedW = if (isPortrait) bh else bw
-                                val rotatedH = if (isPortrait) bw else bh
+                            val isPortrait = rotationDegrees % 180 != 0
+                            val rotatedW = if (isPortrait) bh else bw
+                            val rotatedH = if (isPortrait) bw else bh
 
-                                val scale = maxOf(viewWidth / rotatedW, viewHeight / rotatedH)
-                                matrix.postScale(scale, scale)
+                            val scale = maxOf(viewWidth / rotatedW, viewHeight / rotatedH)
+                            matrix.postScale(scale, scale)
 
-                                if (cameraServiceBinder?.isFrontCamera() == true) {
-                                    matrix.postScale(-1f, 1f)
-                                }
-                                matrix.postTranslate(viewWidth / 2f, viewHeight / 2f)
-                                val paint = Paint().apply { isFilterBitmap = true }
-                                canvas.drawBitmap(bitmap, matrix, paint)
-                                previewImageView.unlockCanvasAndPost(canvas)
+                            if (cameraServiceBinder?.isFrontCamera() == true) {
+                                matrix.postScale(-1f, 1f)
                             }
+                            matrix.postTranslate(viewWidth / 2f, viewHeight / 2f)
+                            canvas.drawBitmap(bitmap, matrix, Paint().apply { isFilterBitmap = true })
+                            previewImageView.unlockCanvasAndPost(canvas)
                         }
                     }
                 }
             }
-            // Сразу после подключения обновляем UI, чтобы кольцо узнало время старта
             runOnUiThread { updateUiState() }
         }
 
@@ -393,19 +380,16 @@ class MainActivity : AppCompatActivity() {
         val res = prefs.getString("pref_resolution", "1080").let { if(it=="4k") "4K UHD" else "${it}p HD" }
         val fps = prefs.getInt("pref_fps", 30)
 
-        // 1. Получаем счетчик файлов для Loop: X / Y
         val currentFiles = StorageManager.getFilesCount(this)
         val loopText = if (limit > 50) "Loop: OFF" else "Loop: $currentFiles / $limit files"
 
-        // 2. Считаем прогресс ТЕКУЩЕГО 10-минутного ролика для кольца
         val startTime = cameraServiceBinder?.getRecordingStartTime() ?: 0L
         val fileProgress = if (CameraService.isRecordingActive && startTime > 0) {
             val elapsed = System.currentTimeMillis() - startTime
-            (elapsed.toFloat() / 600000f).coerceIn(0f, 1f) // 10 мин
+            (elapsed.toFloat() / 600000f).coerceIn(0f, 1f)
         } else 0f
         storageRing.setProgress(fileProgress)
 
-        // 3. Формируем текст статуса
         val statusLine = if (CameraService.isRecordingActive) "${getString(R.string.status_recording)}  |  $loopText" else "${getString(R.string.status_waiting)}  |  $loopText"
         val configLine = "$cam  |  $res  |  $fps FPS"
 
@@ -428,55 +412,93 @@ class MainActivity : AppCompatActivity() {
     private fun openSmartSettingsDialog() {
         isFirstRunDialogOpen = true
         val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
+        val isFirstRun = !prefs.getBoolean("f_run", false)
+
+        val sysLang = Locale.getDefault().language
+        val cLang = if (isFirstRun) (if (sysLang == "ru") "ru" else "en") else (prefs.getString("app_lang", "en") ?: "en")
+
         var cCam = prefs.getString("pref_camera", "auto") ?: "auto"
         var cFiles = prefs.getInt("max_loop_files", 6)
-        val cLang = prefs.getString("app_lang", "en") ?: "en"
         var cCodec = prefs.getString("pref_codec", "auto") ?: "auto"
-        val isFirstRun = !prefs.getBoolean("f_run", false)
 
         ProcessCameraProvider.getInstance(this).addListener({
             val provider = ProcessCameraProvider.getInstance(this).get()
             val all = provider.availableCameraInfos
-            val fCam = all.firstOrNull { it.lensFacing == CameraSelector.LENS_FACING_FRONT }
-            val bStd = all.filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }.maxByOrNull { Camera2CameraInfo.from(it).getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull() ?: 0f }
-            val bWide = all.filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }.minByOrNull { Camera2CameraInfo.from(it).getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull() ?: Float.MAX_VALUE }
 
             val scroll = ScrollView(this)
             val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(64, 48, 64, 48) }
             fun addHeader(t: String) { layout.addView(TextView(this).apply { text = t.uppercase(); textSize = 11f; setTypeface(null, Typeface.BOLD); setTextColor("#66BB6A".toColorInt()); setPadding(0, 48, 0, 16) }) }
 
+            // ЯЗЫК
             addHeader(if(cLang == "ru") "Язык" else "Language")
             val rgL = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
             val rbRu = RadioButton(this).apply { text = "RU"; setPadding(0,0,40,0) }; val rbEn = RadioButton(this).apply { text = "EN" }
             rgL.addView(rbRu); rgL.addView(rbEn); if(cLang == "ru") rbRu.isChecked = true else rbEn.isChecked = true
             layout.addView(rgL)
 
-            addHeader(getString(R.string.settings_pip))
+            // АВТОМАТИЗАЦИЯ
+            addHeader(if(cLang == "ru") "Автоматизация" else "Automation")
             val swPip = SwitchCompat(this).apply { text = getString(R.string.settings_pip_desc); isChecked = prefs.getBoolean("pref_pip", false) }
-            layout.addView(swPip)
+            val swAuto = SwitchCompat(this).apply {
+                text = if(cLang == "ru") "Авто-старт при зарядке" else "Auto-record on charge"
+                isChecked = prefs.getBoolean("pref_autostart", false)
+                setPadding(0, 16, 0, 0)
+            }
+            layout.addView(swPip); layout.addView(swAuto)
 
+            // ОБЪЕКТИВ
             addHeader(if(cLang == "ru") "Объектив" else "Camera Lens")
             val rgC = RadioGroup(this).apply { orientation = LinearLayout.VERTICAL }
-            val rbA = RadioButton(this).apply { text = if(cLang == "ru") "Ультра-широкий (Авто)" else "Ultra-Wide (Auto)" }
-            val rbB = RadioButton(this).apply { text = if(cLang == "ru") "Основной сенсор" else "Main Sensor" }
-            val rbF = RadioButton(this).apply { text = if(cLang == "ru") "Салон (Фронт)" else "Cabin Front" }
-            if (fCam == null) rbF.isEnabled = false
+            val rbA = RadioButton(this).apply { text = if(cLang == "ru") "Ультра-широкий (Авто)" else "Ultra-Wide (Auto)"; id = View.generateViewId() }
+            val rbB = RadioButton(this).apply { text = if(cLang == "ru") "Основной сенсор" else "Main Sensor"; id = View.generateViewId() }
+            val rbF = RadioButton(this).apply { text = if(cLang == "ru") "Салон (Фронт)" else "Cabin Front"; id = View.generateViewId() }
+            val frontInfo = all.firstOrNull { it.lensFacing == CameraSelector.LENS_FACING_FRONT }
+            if (frontInfo == null) rbF.isEnabled = false
             rgC.addView(rbA); rgC.addView(rbB); rgC.addView(rbF)
             when(cCam) { "front" -> rbF.isChecked = true; "back" -> rbB.isChecked = true; else -> rbA.isChecked = true }
             layout.addView(rgC)
 
-            addHeader(if(cLang == "ru") "Разрешение" else "Resolution")
-            val rb4 = RadioButton(this).apply { text = "4K UHD" }; val rb1 = RadioButton(this).apply { text = "1080p Full HD" }; val rb7 = RadioButton(this).apply { text = "720p HD" }
+            // РАЗРЕШЕНИЕ И FPS
+            addHeader(if(cLang == "ru") "Качество" else "Resolution")
+            val rb4 = RadioButton(this).apply { text = "4K UHD" }
+            val rb1 = RadioButton(this).apply { text = "1080p Full HD" }
+            val rb7 = RadioButton(this).apply { text = "720p HD" }
             val rgR = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }; rgR.addView(rb4); rgR.addView(rb1); rgR.addView(rb7)
             val sRes = prefs.getString("pref_resolution", "1080"); if(sRes == "4k") rb4.isChecked = true else if(sRes == "720") rb7.isChecked = true else rb1.isChecked = true
             layout.addView(rgR)
 
-            addHeader(if(cLang == "ru") "Частота кадров" else "Framerate")
             val rgF = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
-            val rb6 = RadioButton(this).apply { text = "60 FPS"; setPadding(0,0,40,0) }; val rb3 = RadioButton(this).apply { text = "30 FPS" }
+            val rb6 = RadioButton(this).apply { setPadding(0,0,40,0) }; val rb3 = RadioButton(this).apply { text = "30 FPS" }
             rgF.addView(rb6); rgF.addView(rb3); if(prefs.getInt("pref_fps", 30) == 60) rb6.isChecked = true else rb3.isChecked = true
             layout.addView(rgF)
 
+            fun checkHardware(camType: String) {
+                val target = when(camType) {
+                    "front" -> all.firstOrNull { it.lensFacing == CameraSelector.LENS_FACING_FRONT }
+                    "back" -> all.filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }.maxByOrNull { Camera2CameraInfo.from(it).getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull() ?: 0f }
+                    else -> all.filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }.minByOrNull { Camera2CameraInfo.from(it).getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull() ?: Float.MAX_VALUE }
+                }
+                target?.let {
+                    val map = Camera2CameraInfo.from(it).getCameraCharacteristic(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                    val ranges = Camera2CameraInfo.from(it).getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+                    val sizes = map?.getOutputSizes(MediaRecorder::class.java)
+
+                    rb4.isEnabled = sizes?.any { s -> s.width >= 3840 } == true
+
+                    val officiallySupports60 = ranges?.any { r -> r.upper >= 60 } == true
+                    rb6.text = if (officiallySupports60) "60 FPS" else if(cLang == "ru") "60 FPS (Эксперимент)" else "60 FPS (Experimental)"
+
+                    if (!rb4.isEnabled && rb4.isChecked) rb1.isChecked = true
+                }
+            }
+
+            checkHardware(cCam)
+            rgC.setOnCheckedChangeListener { _, id ->
+                cCam = when(id) { rbF.id -> "front"; rbB.id -> "back"; else -> "auto" }
+                checkHardware(cCam)
+            }
+
+            // КОДЕК
             addHeader(if(cLang == "ru") "Формат видео (Кодек)" else "Video Codec")
             val rgCodec = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
             val rbCodecAuto = RadioButton(this).apply { text = if(cLang == "ru") "АВТО (HEVC -> H.264)" else "AUTO (HEVC -> H.264)" }
@@ -486,34 +508,39 @@ class MainActivity : AppCompatActivity() {
             when(cCodec) { "hevc" -> rbCodecHevc.isChecked = true; "avc" -> rbCodecAvc.isChecked = true; else -> rbCodecAuto.isChecked = true }
             layout.addView(rgCodec)
 
+            // ПАМЯТЬ С ЧЕСТНЫМ ДИАПАЗОНОМ ДЛЯ "АВТО"
             addHeader(if(cLang == "ru") "Лимит памяти" else "Storage Limit")
             val loopL = TextView(this).apply { textSize = 15f; setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_active)) }
             val cycleI = TextView(this).apply { text = "⏱ 1 cycle = 10 minutes"; textSize = 12f; setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_inactive)); setPadding(0,4,0,16) }
             val seek = SeekBar(this).apply { max = 18; progress = if(cFiles > 50) 18 else cFiles - 3 }
             val storL = TextView(this).apply { textSize = 14f; setTypeface(null, Typeface.BOLD); setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_active)); setPadding(0,16,0,0) }
 
-            fun refresh() {
-                val t = when(cCam) { "front" -> fCam; "back" -> bStd; else -> bWide ?: bStd }
-                var s4=false; var s1=false; var s6=false
-                t?.let { c ->
-                    val ch = Camera2CameraInfo.from(c); val m = ch.getCameraCharacteristic(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                    val sz = m?.getOutputSizes(MediaRecorder::class.java)
-                    s1 = sz?.any { it.width == 1920 } == true; s4 = sz?.any { it.width >= 3840 } == true
-                    s6 = ch.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)?.any { it.upper >= 60 } == true
-                }
-                rb4.isEnabled = s4; rb1.isEnabled = s1; rb6.isEnabled = s6
-                if(!s4 && rb4.isChecked) rb1.isChecked = true
-                if(!s6 && rb6.isChecked) rb3.isChecked = true
+            fun refreshStorageText() {
                 val mult = (if(rb4.isChecked) 2.8 else if(rb7.isChecked) 0.6 else 1.0) * (if(rb6.isChecked) 1.6 else 1.0)
-                val codecMult = if(rbCodecHevc.isChecked) 0.7 else 1.0
-                if (cFiles > 50) { storL.text = getString(R.string.infinite_storage); loopL.text = if(rbRu.isChecked) "Перезапись: ВЫКЛ" else "Loop Record: OFF" }
-                else { storL.text = String.format(Locale.US, if(rbRu.isChecked) "Объем цикла: %.1f ГБ" else "Estimated loop: %.1f GB", cFiles * 1.5 * mult * codecMult); loopL.text = if(rbRu.isChecked) "Файлов в цикле: $cFiles" else "Files in loop: $cFiles" }
+
+                if (cFiles > 50) {
+                    storL.text = getString(R.string.infinite_storage)
+                    loopL.text = if(rbRu.isChecked) "Перезапись: ВЫКЛ" else "Loop Record: OFF"
+                } else {
+                    loopL.text = if(rbRu.isChecked) "Файлов в цикле: $cFiles" else "Files in loop: $cFiles"
+
+                    if (rbCodecAuto.isChecked) {
+                        // Показываем диапазон от экономного HEVC (0.7) до тяжелого AVC (1.0)
+                        val minGb = cFiles * 1.5 * mult * 0.7
+                        val maxGb = cFiles * 1.5 * mult * 1.0
+                        storL.text = String.format(Locale.US, if(rbRu.isChecked) "Объем: %.1f - %.1f ГБ" else "Est. space: %.1f - %.1f GB", minGb, maxGb)
+                    } else {
+                        // Точный расчет, если кодек жестко задан
+                        val codecMult = if(rbCodecHevc.isChecked) 0.7 else 1.0
+                        storL.text = String.format(Locale.US, if(rbRu.isChecked) "Объем цикла: %.1f ГБ" else "Estimated loop: %.1f GB", cFiles * 1.5 * mult * codecMult)
+                    }
+                }
             }
-            refresh()
-            rgC.setOnCheckedChangeListener { _, id -> cCam = when(id){rbF.id->"front";rbB.id->"back";else->"auto"}; refresh() }
-            rgR.setOnCheckedChangeListener { _, _ -> refresh() }; rgF.setOnCheckedChangeListener { _, _ -> refresh() }
-            rgCodec.setOnCheckedChangeListener { _, id -> cCodec = when(id){rbCodecHevc.id->"hevc";rbCodecAvc.id->"avc";else->"auto"}; refresh() }
-            seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener { override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) { cFiles = if (p == 18) 999 else p + 3; refresh() }; override fun onStartTrackingTouch(s: SeekBar?) {}; override fun onStopTrackingTouch(s: SeekBar?) {} })
+
+            refreshStorageText()
+            rgR.setOnCheckedChangeListener { _, _ -> refreshStorageText() }; rgF.setOnCheckedChangeListener { _, _ -> refreshStorageText() }
+            rgCodec.setOnCheckedChangeListener { _, id -> cCodec = when(id){rbCodecHevc.id->"hevc";rbCodecAvc.id->"avc";else->"auto"}; refreshStorageText() }
+            seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener { override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) { cFiles = if (p == 18) 999 else p + 3; refreshStorageText() }; override fun onStartTrackingTouch(s: SeekBar?) {}; override fun onStopTrackingTouch(s: SeekBar?) {} })
 
             layout.addView(loopL); layout.addView(cycleI); layout.addView(seek); layout.addView(storL)
             scroll.addView(layout)
@@ -522,7 +549,17 @@ class MainActivity : AppCompatActivity() {
                 .setPositiveButton(getString(R.string.btn_save_config)) { _, _ ->
                     val sR = if(rb4.isChecked)"4k" else if(rb7.isChecked)"720" else "1080"
                     val sL = if(rbRu.isChecked) "ru" else "en"
-                    prefs.edit { putBoolean("f_run", true); putString("app_lang", sL); putBoolean("pref_pip", swPip.isChecked); putString("pref_camera", cCam); putString("pref_resolution", sR); putInt("pref_fps", if(rb6.isChecked)60 else 30); putInt("max_loop_files", cFiles); putString("pref_codec", cCodec) }
+                    prefs.edit {
+                        putBoolean("f_run", true)
+                        putString("app_lang", sL)
+                        putBoolean("pref_pip", swPip.isChecked)
+                        putBoolean("pref_autostart", swAuto.isChecked)
+                        putString("pref_camera", cCam)
+                        putString("pref_resolution", sR)
+                        putInt("pref_fps", if(rb6.isChecked) 60 else 30)
+                        putInt("max_loop_files", cFiles)
+                        putString("pref_codec", cCodec)
+                    }
                     if (sL != cLang) setAppLocale(sL) else { updateUiState(); if (hasPermissions() && !CameraService.isRecordingActive) { try { startForegroundService(Intent(this@MainActivity, CameraService::class.java).apply { action = CameraService.ACTION_STANDBY }) } catch (_: Exception) {} } }
                 }
             if (!isFirstRun) dialogBuilder.setNegativeButton(getString(R.string.btn_cancel), null)
