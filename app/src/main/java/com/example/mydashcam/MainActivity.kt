@@ -35,6 +35,10 @@ import androidx.core.graphics.toColorInt
 import androidx.recyclerview.widget.*
 import com.example.mydashcam.views.StorageRingView
 import com.example.mydashcam.utils.StorageManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import androidx.lifecycle.lifecycleScope
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -299,7 +303,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // НОВОЕ: Включаем рендеринг предпросмотра
         CameraService.isAppVisible = true
+
         if (hasPermissions()) {
             Handler(Looper.getMainLooper()).postDelayed({ checkFirstRunDialog() }, 500)
             try { contentResolver.registerContentObserver(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, mediaStoreObserver) } catch (_: Exception) {}
@@ -325,7 +331,10 @@ class MainActivity : AppCompatActivity() {
     override fun onStop() {
         super.onStop()
         if (isInPictureInPictureMode) return
+
+        // НОВОЕ: Отключаем рендеринг предпросмотра для экономии батареи в фоне
         CameraService.isAppVisible = false
+
         cameraServiceBinder?.setPreviewListener(null)
         try { unbindService(serviceConnection) } catch (_: Exception) {}
         cameraServiceBinder = null
@@ -508,7 +517,7 @@ class MainActivity : AppCompatActivity() {
             when(cCodec) { "hevc" -> rbCodecHevc.isChecked = true; "avc" -> rbCodecAvc.isChecked = true; else -> rbCodecAuto.isChecked = true }
             layout.addView(rgCodec)
 
-            // ПАМЯТЬ С ЧЕСТНЫМ ДИАПАЗОНОМ ДЛЯ "АВТО"
+            // ПАМЯТЬ
             addHeader(if(cLang == "ru") "Лимит памяти" else "Storage Limit")
             val loopL = TextView(this).apply { textSize = 15f; setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_active)) }
             val cycleI = TextView(this).apply { text = "⏱ 1 cycle = 10 minutes"; textSize = 12f; setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_inactive)); setPadding(0,4,0,16) }
@@ -517,6 +526,7 @@ class MainActivity : AppCompatActivity() {
 
             fun refreshStorageText() {
                 val mult = (if(rb4.isChecked) 2.8 else if(rb7.isChecked) 0.6 else 1.0) * (if(rb6.isChecked) 1.6 else 1.0)
+                val codecMult = if(rbCodecHevc.isChecked || rbCodecAuto.isChecked) 0.75 else 1.0
 
                 if (cFiles > 50) {
                     storL.text = getString(R.string.infinite_storage)
@@ -525,13 +535,10 @@ class MainActivity : AppCompatActivity() {
                     loopL.text = if(rbRu.isChecked) "Файлов в цикле: $cFiles" else "Files in loop: $cFiles"
 
                     if (rbCodecAuto.isChecked) {
-                        // Показываем диапазон от экономного HEVC (0.7) до тяжелого AVC (1.0)
                         val minGb = cFiles * 1.5 * mult * 0.7
                         val maxGb = cFiles * 1.5 * mult * 1.0
                         storL.text = String.format(Locale.US, if(rbRu.isChecked) "Объем: %.1f - %.1f ГБ" else "Est. space: %.1f - %.1f GB", minGb, maxGb)
                     } else {
-                        // Точный расчет, если кодек жестко задан
-                        val codecMult = if(rbCodecHevc.isChecked) 0.7 else 1.0
                         storL.text = String.format(Locale.US, if(rbRu.isChecked) "Объем цикла: %.1f ГБ" else "Estimated loop: %.1f GB", cFiles * 1.5 * mult * codecMult)
                     }
                 }
@@ -567,22 +574,30 @@ class MainActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    // НОВОЕ: ОПТИМИЗАЦИЯ - Асинхронная загрузка галереи, чтобы не лагал интерфейс
     @SuppressLint("NotifyDataSetChanged")
     private fun loadVideos() {
-        videoList.clear()
-        try {
-            contentResolver.query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.DISPLAY_NAME, MediaStore.Video.Media.SIZE, MediaStore.Video.Media.DURATION, MediaStore.Video.Media.DATE_ADDED), "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?", arrayOf("%Movies/MyDashcam%"), "${MediaStore.Video.Media.DATE_ADDED} DESC")?.use { cursor ->
-                while (cursor.moveToNext()) {
-                    val name = cursor.getString(1) ?: ""
-                    val isL = name.startsWith("LOCKED_")
-                    val item = VideoItem(cursor.getLong(0), name, cursor.getLong(2), cursor.getLong(3), cursor.getLong(4), ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cursor.getLong(0)), isL)
-                    if (currentTab == TabState.PROTECTED && isL) videoList.add(item)
-                    else if (currentTab == TabState.TIMELINE && name.startsWith("BVR_PRO_")) videoList.add(item)
+        lifecycleScope.launch(Dispatchers.IO) { // Уходим в фоновый поток (не грузим CPU)
+            val newList = mutableListOf<VideoItem>()
+            try {
+                contentResolver.query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.DISPLAY_NAME, MediaStore.Video.Media.SIZE, MediaStore.Video.Media.DURATION, MediaStore.Video.Media.DATE_ADDED), "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?", arrayOf("%Movies/MyDashcam%"), "${MediaStore.Video.Media.DATE_ADDED} DESC")?.use { cursor ->
+                    while (cursor.moveToNext()) {
+                        val name = cursor.getString(1) ?: ""
+                        val isL = name.startsWith("LOCKED_")
+                        val item = VideoItem(cursor.getLong(0), name, cursor.getLong(2), cursor.getLong(3), cursor.getLong(4), ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cursor.getLong(0)), isL)
+                        if (currentTab == TabState.PROTECTED && isL) newList.add(item)
+                        else if (currentTab == TabState.TIMELINE && name.startsWith("BVR_PRO_")) newList.add(item)
+                    }
                 }
+            } catch (_: Exception) {}
+
+            withContext(Dispatchers.Main) { // Возвращаемся в главный поток только для отрисовки
+                videoList.clear()
+                videoList.addAll(newList)
+                adapter.notifyDataSetChanged()
+                updateUiState()
             }
-            adapter.notifyDataSetChanged()
-            updateUiState()
-        } catch (_: Exception) {}
+        }
     }
 
     inner class VideoAdapter : RecyclerView.Adapter<VideoAdapter.VideoViewHolder>() {
@@ -599,8 +614,8 @@ class MainActivity : AppCompatActivity() {
             val sz = if (v.size > 1073741824) String.format(Locale.US, "%.2f GB", v.size / 1073741824.0) else "${v.size / 1048576} MB"
             h.tI.text = context.getString(R.string.video_info_format, (v.duration / 60000).toInt(), sz)
             h.bL.setImageResource(if (v.isLocked) android.R.drawable.ic_menu_revert else android.R.drawable.ic_menu_save)
-            h.bL.setOnClickListener { val newName = if (v.isLocked) v.name.replace("LOCKED_BVR_PRO_", "BVR_PRO_") else v.name.replace("BVR_PRO_", "LOCKED_BVR_PRO_"); contentResolver.update(v.uri, ContentValues().apply { put(MediaStore.Video.Media.DISPLAY_NAME, newName) }, null, null) }
-            h.bD.setOnClickListener { AlertDialog.Builder(context, android.R.style.Theme_DeviceDefault_Dialog_Alert).setTitle(getString(R.string.dialog_delete_title)).setMessage(getString(R.string.dialog_delete_msg)).setPositiveButton(getString(R.string.btn_delete)) { _, _ -> contentResolver.delete(v.uri, null, null) }.setNegativeButton(getString(R.string.btn_cancel), null).show() }
+            h.bL.setOnClickListener { val newName = if (v.isLocked) v.name.replace("LOCKED_BVR_PRO_", "BVR_PRO_") else v.name.replace("BVR_PRO_", "LOCKED_BVR_PRO_"); contentResolver.update(v.uri, ContentValues().apply { put(MediaStore.Video.Media.DISPLAY_NAME, newName) }, null, null); loadVideos() }
+            h.bD.setOnClickListener { AlertDialog.Builder(context, android.R.style.Theme_DeviceDefault_Dialog_Alert).setTitle(getString(R.string.dialog_delete_title)).setMessage(getString(R.string.dialog_delete_msg)).setPositiveButton(getString(R.string.btn_delete)) { _, _ -> contentResolver.delete(v.uri, null, null); loadVideos() }.setNegativeButton(getString(R.string.btn_cancel), null).show() }
             try { h.img?.setImageBitmap(contentResolver.loadThumbnail(v.uri, Size(256, 256), null)) } catch (_: Exception) { h.img?.setImageDrawable(null) }
             h.itemView.setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW).apply { setDataAndType(v.uri, "video/mp4"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }
         }

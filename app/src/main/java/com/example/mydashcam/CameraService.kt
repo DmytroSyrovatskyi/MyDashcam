@@ -341,8 +341,13 @@ class CameraService : LifecycleService() {
 
                 val recordPreview = Preview.Builder().setResolutionSelector(selector).let { builder ->
                     val extender = Camera2Interop.Extender(builder)
+
+                    // НОВОЕ: ОПТИМИЗАЦИЯ СТАБИЛИЗАЦИИ И ФОКУСА
                     extender.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, bestRange)
-                    extender.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
+                    extender.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO) // Плавный фокус
+                    extender.setCaptureRequestOption(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON) // EIS
+                    extender.setCaptureRequestOption(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_ON) // OIS
+
                     extender.setSessionCaptureCallback(object : CameraCaptureSession.CaptureCallback() {
                         override fun onCaptureCompleted(s: CameraCaptureSession, req: CaptureRequest, res: TotalCaptureResult) {
                             res.get(CaptureResult.SENSOR_SENSITIVITY)?.let { iso -> isoEma = (iso * 0.15f) + (isoEma * 0.85f) }
@@ -357,9 +362,11 @@ class CameraService : LifecycleService() {
                     }
                 }
 
+                // НОВОЕ: ОПТИМИЗАЦИЯ РАЗРЕШЕНИЯ ДЛЯ ПРЕДПРОСМОТРА (Разгрузка Exynos)
                 val analysisSelector = ResolutionSelector.Builder()
                     .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
-                    .setResolutionStrategy(ResolutionStrategy(Size(1920, 1080), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
+                    // Вместо 1920x1080 берем легкие 854x480. Глазом разницу в превью не видно, но CPU скажет спасибо.
+                    .setResolutionStrategy(ResolutionStrategy(Size(854, 480), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
                     .build()
 
                 val imageAnalysis = ImageAnalysis.Builder()
@@ -368,7 +375,8 @@ class CameraService : LifecycleService() {
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build().apply {
                         setAnalyzer(ContextCompat.getMainExecutor(this@CameraService)) { imageProxy ->
-                            if (previewCallback != null) {
+                            // НОВОЕ: Игнорируем тяжелую обработку Bitmap, если приложение свернуто
+                            if (previewCallback != null && isAppVisible) {
                                 if (reusableBitmap == null || reusableBitmap!!.width != imageProxy.width) {
                                     reusableBitmap = createBitmap(imageProxy.width, imageProxy.height)
                                 }
@@ -376,14 +384,13 @@ class CameraService : LifecycleService() {
                                 reusableBitmap!!.copyPixelsFromBuffer(imageProxy.planes[0].buffer)
                                 previewCallback?.invoke(reusableBitmap!!, imageProxy.imageInfo.rotationDegrees)
                             }
-                            imageProxy.close()
+                            imageProxy.close() // Обязательно закрываем фрейм, чтобы камера не зависла
                         }
                     }
 
                 try {
                     provider.unbindAll()
                     val useCases = mutableListOf<UseCase>(imageAnalysis)
-                    // Убрана лишняя проверка на != null
                     if (isRecording) useCases.add(recordPreview)
                     val cam = provider.bindToLifecycle(this, CameraSelector.Builder().addCameraFilter { _ -> listOf(target) }.build(), *useCases.toTypedArray())
                     cameraControl = cam.cameraControl
@@ -417,7 +424,6 @@ class CameraService : LifecycleService() {
                 setOutputFile(pfd!!.fileDescriptor)
                 prepare()
             }
-            // Заменено 'e' на '_'
         } catch (_: Exception) {
             isRecordingActive = false
             stopHardware()
