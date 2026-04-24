@@ -262,7 +262,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestAppPermissions() {
-        val permissions = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.READ_MEDIA_VIDEO)
+        // НОВОЕ: Запрашиваем права на GPS
+        val permissions = arrayOf(
+            Manifest.permission.CAMERA,
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.POST_NOTIFICATIONS,
+            Manifest.permission.READ_MEDIA_VIDEO,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        )
         if (!hasPermissions()) requestPermissions(permissions, 101)
     }
 
@@ -303,9 +310,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // НОВОЕ: Включаем рендеринг предпросмотра
         CameraService.isAppVisible = true
-
         if (hasPermissions()) {
             Handler(Looper.getMainLooper()).postDelayed({ checkFirstRunDialog() }, 500)
             try { contentResolver.registerContentObserver(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, mediaStoreObserver) } catch (_: Exception) {}
@@ -331,10 +336,7 @@ class MainActivity : AppCompatActivity() {
     override fun onStop() {
         super.onStop()
         if (isInPictureInPictureMode) return
-
-        // НОВОЕ: Отключаем рендеринг предпросмотра для экономии батареи в фоне
         CameraService.isAppVisible = false
-
         cameraServiceBinder?.setPreviewListener(null)
         try { unbindService(serviceConnection) } catch (_: Exception) {}
         cameraServiceBinder = null
@@ -455,6 +457,13 @@ class MainActivity : AppCompatActivity() {
             }
             layout.addView(swPip); layout.addView(swAuto)
 
+            // НОВОЕ: ШТАМП НА ВИДЕО (Субтитры)
+            addHeader(if(cLang == "ru") "Штамп на видео (Субтитры)" else "Video Overlay (Subtitles)")
+            val swStampDate = SwitchCompat(this).apply { text = if(cLang == "ru") "Дата и Время" else "Date & Time"; isChecked = prefs.getBoolean("pref_stamp_date", true) }
+            val swStampSpeed = SwitchCompat(this).apply { text = if(cLang == "ru") "Скорость (км/ч)" else "Speed (km/h)"; isChecked = prefs.getBoolean("pref_stamp_speed", false); setPadding(0, 16, 0, 0) }
+            val swStampGps = SwitchCompat(this).apply { text = if(cLang == "ru") "Координаты (GPS)" else "GPS Coordinates"; isChecked = prefs.getBoolean("pref_stamp_gps", false); setPadding(0, 16, 0, 0) }
+            layout.addView(swStampDate); layout.addView(swStampSpeed); layout.addView(swStampGps)
+
             // ОБЪЕКТИВ
             addHeader(if(cLang == "ru") "Объектив" else "Camera Lens")
             val rgC = RadioGroup(this).apply { orientation = LinearLayout.VERTICAL }
@@ -493,19 +502,14 @@ class MainActivity : AppCompatActivity() {
                     val sizes = map?.getOutputSizes(MediaRecorder::class.java)
 
                     rb4.isEnabled = sizes?.any { s -> s.width >= 3840 } == true
-
                     val officiallySupports60 = ranges?.any { r -> r.upper >= 60 } == true
                     rb6.text = if (officiallySupports60) "60 FPS" else if(cLang == "ru") "60 FPS (Эксперимент)" else "60 FPS (Experimental)"
-
                     if (!rb4.isEnabled && rb4.isChecked) rb1.isChecked = true
                 }
             }
 
             checkHardware(cCam)
-            rgC.setOnCheckedChangeListener { _, id ->
-                cCam = when(id) { rbF.id -> "front"; rbB.id -> "back"; else -> "auto" }
-                checkHardware(cCam)
-            }
+            rgC.setOnCheckedChangeListener { _, id -> cCam = when(id) { rbF.id -> "front"; rbB.id -> "back"; else -> "auto" }; checkHardware(cCam) }
 
             // КОДЕК
             addHeader(if(cLang == "ru") "Формат видео (Кодек)" else "Video Codec")
@@ -561,6 +565,9 @@ class MainActivity : AppCompatActivity() {
                         putString("app_lang", sL)
                         putBoolean("pref_pip", swPip.isChecked)
                         putBoolean("pref_autostart", swAuto.isChecked)
+                        putBoolean("pref_stamp_date", swStampDate.isChecked) // Сохраняем дату
+                        putBoolean("pref_stamp_speed", swStampSpeed.isChecked) // Сохраняем скорость
+                        putBoolean("pref_stamp_gps", swStampGps.isChecked) // Сохраняем GPS
                         putString("pref_camera", cCam)
                         putString("pref_resolution", sR)
                         putInt("pref_fps", if(rb6.isChecked) 60 else 30)
@@ -568,16 +575,20 @@ class MainActivity : AppCompatActivity() {
                         putString("pref_codec", cCodec)
                     }
                     if (sL != cLang) setAppLocale(sL) else { updateUiState(); if (hasPermissions() && !CameraService.isRecordingActive) { try { startForegroundService(Intent(this@MainActivity, CameraService::class.java).apply { action = CameraService.ACTION_STANDBY }) } catch (_: Exception) {} } }
+
+                    // НОВОЕ: Запрос прав на геолокацию, если включили штампы
+                    if ((swStampSpeed.isChecked || swStampGps.isChecked) && ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                        requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 102)
+                    }
                 }
             if (!isFirstRun) dialogBuilder.setNegativeButton(getString(R.string.btn_cancel), null)
             dialogBuilder.show()
         }, ContextCompat.getMainExecutor(this))
     }
 
-    // НОВОЕ: ОПТИМИЗАЦИЯ - Асинхронная загрузка галереи, чтобы не лагал интерфейс
     @SuppressLint("NotifyDataSetChanged")
     private fun loadVideos() {
-        lifecycleScope.launch(Dispatchers.IO) { // Уходим в фоновый поток (не грузим CPU)
+        lifecycleScope.launch(Dispatchers.IO) {
             val newList = mutableListOf<VideoItem>()
             try {
                 contentResolver.query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.DISPLAY_NAME, MediaStore.Video.Media.SIZE, MediaStore.Video.Media.DURATION, MediaStore.Video.Media.DATE_ADDED), "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?", arrayOf("%Movies/MyDashcam%"), "${MediaStore.Video.Media.DATE_ADDED} DESC")?.use { cursor ->
@@ -591,7 +602,7 @@ class MainActivity : AppCompatActivity() {
                 }
             } catch (_: Exception) {}
 
-            withContext(Dispatchers.Main) { // Возвращаемся в главный поток только для отрисовки
+            withContext(Dispatchers.Main) {
                 videoList.clear()
                 videoList.addAll(newList)
                 adapter.notifyDataSetChanged()
@@ -613,9 +624,22 @@ class MainActivity : AppCompatActivity() {
             h.tD.text = context.getString(R.string.video_time_range, sDate, eDate)
             val sz = if (v.size > 1073741824) String.format(Locale.US, "%.2f GB", v.size / 1073741824.0) else "${v.size / 1048576} MB"
             h.tI.text = context.getString(R.string.video_info_format, (v.duration / 60000).toInt(), sz)
+
             h.bL.setImageResource(if (v.isLocked) android.R.drawable.ic_menu_revert else android.R.drawable.ic_menu_save)
-            h.bL.setOnClickListener { val newName = if (v.isLocked) v.name.replace("LOCKED_BVR_PRO_", "BVR_PRO_") else v.name.replace("BVR_PRO_", "LOCKED_BVR_PRO_"); contentResolver.update(v.uri, ContentValues().apply { put(MediaStore.Video.Media.DISPLAY_NAME, newName) }, null, null); loadVideos() }
-            h.bD.setOnClickListener { AlertDialog.Builder(context, android.R.style.Theme_DeviceDefault_Dialog_Alert).setTitle(getString(R.string.dialog_delete_title)).setMessage(getString(R.string.dialog_delete_msg)).setPositiveButton(getString(R.string.btn_delete)) { _, _ -> contentResolver.delete(v.uri, null, null); loadVideos() }.setNegativeButton(getString(R.string.btn_cancel), null).show() }
+            h.bL.setOnClickListener {
+                val newName = if (v.isLocked) v.name.replace("LOCKED_BVR_PRO_", "BVR_PRO_") else v.name.replace("BVR_PRO_", "LOCKED_BVR_PRO_")
+                contentResolver.update(v.uri, ContentValues().apply { put(MediaStore.Video.Media.DISPLAY_NAME, newName) }, null, null)
+                StorageManager.renameCompanionSrt(context, v.name, newName) // НОВОЕ: Переименовываем субтитры
+                loadVideos()
+            }
+
+            h.bD.setOnClickListener {
+                AlertDialog.Builder(context, android.R.style.Theme_DeviceDefault_Dialog_Alert).setTitle(getString(R.string.dialog_delete_title)).setMessage(getString(R.string.dialog_delete_msg)).setPositiveButton(getString(R.string.btn_delete)) { _, _ ->
+                    contentResolver.delete(v.uri, null, null)
+                    StorageManager.deleteCompanionSrt(context, v.name) // НОВОЕ: Удаляем субтитры
+                    loadVideos()
+                }.setNegativeButton(getString(R.string.btn_cancel), null).show()
+            }
             try { h.img?.setImageBitmap(contentResolver.loadThumbnail(v.uri, Size(256, 256), null)) } catch (_: Exception) { h.img?.setImageDrawable(null) }
             h.itemView.setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW).apply { setDataAndType(v.uri, "video/mp4"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }
         }

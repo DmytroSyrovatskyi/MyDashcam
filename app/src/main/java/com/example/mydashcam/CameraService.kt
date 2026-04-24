@@ -1,14 +1,18 @@
 package com.example.mydashcam
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.hardware.camera2.*
+import android.location.LocationListener
+import android.location.LocationManager
 import android.media.*
 import android.net.Uri
 import android.os.*
@@ -32,6 +36,7 @@ import androidx.lifecycle.lifecycleScope
 import com.example.mydashcam.utils.NotificationHelper
 import com.example.mydashcam.utils.StorageManager
 import kotlinx.coroutines.*
+import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.roundToInt
@@ -41,6 +46,7 @@ class CameraService : LifecycleService() {
 
     private var mediaRecorder: MediaRecorder? = null
     private var pfd: ParcelFileDescriptor? = null
+    private var srtOutputStream: OutputStream? = null
     private var loopJob: Job? = null
     private var dynamicUpdateJob: Job? = null
     private var cameraProvider: ProcessCameraProvider? = null
@@ -66,6 +72,15 @@ class CameraService : LifecycleService() {
     private var prefResolution = "1080"
     private var prefFps = 30
     private var prefCodec = "auto"
+
+    private var prefStampDate = true
+    private var prefStampSpeed = false
+    private var prefStampGps = false
+
+    private var locationManager: LocationManager? = null
+    private var currentSpeedKmH = 0f
+    private var currentLat = 0.0
+    private var currentLon = 0.0
 
     private var previewCallback: ((Bitmap, Int) -> Unit)? = null
     private var reusableBitmap: Bitmap? = null
@@ -118,9 +133,17 @@ class CameraService : LifecycleService() {
         }
     }
 
+    // НОВОЕ: Слушатель GPS (через лямбду, как просила Студия)
+    private val locationListener = LocationListener { location ->
+        currentSpeedKmH = if (location.hasSpeed()) location.speed * 3.6f else 0f
+        currentLat = location.latitude
+        currentLon = location.longitude
+    }
+
     override fun onCreate() {
         super.onCreate()
         powerManager = getSystemService(POWER_SERVICE) as PowerManager
+        locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         setupThermalListener()
         setupOrientationListener()
 
@@ -139,6 +162,21 @@ class CameraService : LifecycleService() {
         prefResolution = prefs.getString("pref_resolution", "1080") ?: "1080"
         prefFps = prefs.getInt("pref_fps", 30)
         prefCodec = prefs.getString("pref_codec", "auto") ?: "auto"
+
+        prefStampDate = prefs.getBoolean("pref_stamp_date", true)
+        prefStampSpeed = prefs.getBoolean("pref_stamp_speed", false)
+        prefStampGps = prefs.getBoolean("pref_stamp_gps", false)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startLocationTracking() {
+        if ((prefStampSpeed || prefStampGps) && ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            try { locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener) } catch (_: Exception) {}
+        }
+    }
+
+    private fun stopLocationTracking() {
+        try { locationManager?.removeUpdates(locationListener) } catch (_: Exception) {}
     }
 
     private fun setupThermalListener() {
@@ -179,6 +217,7 @@ class CameraService : LifecycleService() {
                 isoEma = minHardwareIso
                 recordingStartTime = System.currentTimeMillis()
                 loadPrefs()
+                startLocationTracking()
                 startHardwareLoop()
             }
             ACTION_STOP -> if (isRecordingActive) {
@@ -186,6 +225,7 @@ class CameraService : LifecycleService() {
                 recordingStartTime = 0L
                 playStopSound()
                 stopHardware()
+                stopLocationTracking()
                 updateNotification()
                 if (isAppVisible) startHardware(isRecording = false)
             }
@@ -238,10 +278,16 @@ class CameraService : LifecycleService() {
         startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
     }
 
+    private fun formatSrtTime(seconds: Int): String {
+        return String.format(Locale.US, "%02d:%02d:%02d,000", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
+    }
+
     private fun startDynamicUpdates() {
         dynamicUpdateJob?.cancel()
         dynamicUpdateJob = lifecycleScope.launch {
             var currEv = 0.0f
+            var srtCounter = 0
+
             while (isRecordingActive) {
                 delay(1000)
 
@@ -261,6 +307,23 @@ class CameraService : LifecycleService() {
                 val baseBitrate = (15_000_000f + (8_000_000f * darkness)) * resMult * fpsMult * codecMult
                 nextTargetBitrate = if (isThermalDowngradeActive) (baseBitrate * 0.7f).toInt() else baseBitrate.toInt()
 
+                if (srtOutputStream != null && (prefStampDate || prefStampSpeed || prefStampGps)) {
+                    val startT = formatSrtTime(srtCounter)
+                    val endT = formatSrtTime(srtCounter + 1)
+                    val parts = mutableListOf<String>()
+
+                    if (prefStampDate) parts.add(SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(System.currentTimeMillis()))
+                    if (prefStampSpeed) parts.add(String.format(Locale.US, "%d km/h", currentSpeedKmH.toInt()))
+                    if (prefStampGps) parts.add(String.format(Locale.US, "%.5f, %.5f", currentLat, currentLon))
+
+                    if (parts.isNotEmpty()) {
+                        val textLine = parts.joinToString("  |  ")
+                        val block = "${srtCounter + 1}\n$startT --> $endT\n$textLine\n\n"
+                        try { srtOutputStream?.write(block.toByteArray()) } catch (_: Exception) {}
+                    }
+                }
+                srtCounter++
+
                 val elapsed = System.currentTimeMillis() - recordingStartTime
                 val fileProgress = ((elapsed.toFloat() / RECORDING_DURATION_MS) * 100).toInt()
                 updateNotification(fileProgress)
@@ -276,8 +339,9 @@ class CameraService : LifecycleService() {
         val name = currentVideoName
         if (isRecordingActive && uri != null && name != null) {
             stopHardware()
-            val cv = ContentValues().apply { put(MediaStore.Video.Media.DISPLAY_NAME, name.replace("BVR_PRO_", "LOCKED_BVR_PRO_")) }
-            contentResolver.update(uri, cv, null, null)
+            val newName = name.replace("BVR_PRO_", "LOCKED_BVR_PRO_")
+            contentResolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.DISPLAY_NAME, newName) }, null, null)
+            StorageManager.renameCompanionSrt(this, name, newName)
             startHardwareLoop()
         }
     }
@@ -286,7 +350,7 @@ class CameraService : LifecycleService() {
         if (!isRecordingActive) return
 
         if (!StorageManager.checkStorageSpace(this)) {
-            isRecordingActive = false; recordingStartTime = 0L; playStopSound(); stopHardware(); updateNotification(); return
+            isRecordingActive = false; recordingStartTime = 0L; playStopSound(); stopHardware(); stopLocationTracking(); updateNotification(); return
         }
 
         val limit = getSharedPreferences("DashcamPrefs", MODE_PRIVATE).getInt("max_loop_files", 6)
@@ -342,11 +406,10 @@ class CameraService : LifecycleService() {
                 val recordPreview = Preview.Builder().setResolutionSelector(selector).let { builder ->
                     val extender = Camera2Interop.Extender(builder)
 
-                    // НОВОЕ: ОПТИМИЗАЦИЯ СТАБИЛИЗАЦИИ И ФОКУСА
                     extender.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, bestRange)
-                    extender.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO) // Плавный фокус
-                    extender.setCaptureRequestOption(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON) // EIS
-                    extender.setCaptureRequestOption(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_ON) // OIS
+                    extender.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
+                    extender.setCaptureRequestOption(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON)
+                    extender.setCaptureRequestOption(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_ON)
 
                     extender.setSessionCaptureCallback(object : CameraCaptureSession.CaptureCallback() {
                         override fun onCaptureCompleted(s: CameraCaptureSession, req: CaptureRequest, res: TotalCaptureResult) {
@@ -362,10 +425,8 @@ class CameraService : LifecycleService() {
                     }
                 }
 
-                // НОВОЕ: ОПТИМИЗАЦИЯ РАЗРЕШЕНИЯ ДЛЯ ПРЕДПРОСМОТРА (Разгрузка Exynos)
                 val analysisSelector = ResolutionSelector.Builder()
                     .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
-                    // Вместо 1920x1080 берем легкие 854x480. Глазом разницу в превью не видно, но CPU скажет спасибо.
                     .setResolutionStrategy(ResolutionStrategy(Size(854, 480), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
                     .build()
 
@@ -375,7 +436,6 @@ class CameraService : LifecycleService() {
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build().apply {
                         setAnalyzer(ContextCompat.getMainExecutor(this@CameraService)) { imageProxy ->
-                            // НОВОЕ: Игнорируем тяжелую обработку Bitmap, если приложение свернуто
                             if (previewCallback != null && isAppVisible) {
                                 if (reusableBitmap == null || reusableBitmap!!.width != imageProxy.width) {
                                     reusableBitmap = createBitmap(imageProxy.width, imageProxy.height)
@@ -384,7 +444,7 @@ class CameraService : LifecycleService() {
                                 reusableBitmap!!.copyPixelsFromBuffer(imageProxy.planes[0].buffer)
                                 previewCallback?.invoke(reusableBitmap!!, imageProxy.imageInfo.rotationDegrees)
                             }
-                            imageProxy.close() // Обязательно закрываем фрейм, чтобы камера не зависла
+                            imageProxy.close()
                         }
                     }
 
@@ -403,13 +463,25 @@ class CameraService : LifecycleService() {
 
     private fun setupRecorder(w: Int, h: Int, rot: Int) {
         try {
-            currentVideoName = "BVR_PRO_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(System.currentTimeMillis())}.mp4"
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(System.currentTimeMillis())
+            currentVideoName = "BVR_PRO_$timestamp.mp4"
+            val srtName = "BVR_PRO_$timestamp.srt"
+
             currentVideoUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
                 put(MediaStore.Video.Media.DISPLAY_NAME, currentVideoName)
                 put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/MyDashcam")
             })
 
             pfd = contentResolver.openFileDescriptor(currentVideoUri!!, "rw")
+
+            if (prefStampDate || prefStampSpeed || prefStampGps) {
+                val srtUri = contentResolver.insert(MediaStore.Files.getContentUri("external"), ContentValues().apply {
+                    put(MediaStore.Files.FileColumns.DISPLAY_NAME, srtName)
+                    put(MediaStore.Files.FileColumns.MIME_TYPE, "application/x-subrip")
+                    put(MediaStore.Files.FileColumns.RELATIVE_PATH, "Movies/MyDashcam")
+                })
+                if (srtUri != null) srtOutputStream = contentResolver.openOutputStream(srtUri)
+            }
 
             mediaRecorder = MediaRecorder(this).apply {
                 setAudioSource(MediaRecorder.AudioSource.MIC)
@@ -441,6 +513,8 @@ class CameraService : LifecycleService() {
             mediaRecorder = null
             try { pfd?.close() } catch(_: Exception) {}
             pfd = null
+            try { srtOutputStream?.close() } catch(_: Exception) {}
+            srtOutputStream = null
             try { cameraProvider?.unbindAll() } catch(_: Exception) {}
         }
     }
@@ -454,6 +528,7 @@ class CameraService : LifecycleService() {
 
     override fun onDestroy() {
         try { unregisterReceiver(powerReceiver) } catch (_: Exception) {}
+        stopLocationTracking()
         orientationEventListener?.disable()
         thermalListener?.let { powerManager?.removeThermalStatusListener(it) }
         isRecordingActive = false
