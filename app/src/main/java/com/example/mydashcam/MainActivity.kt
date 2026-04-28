@@ -9,6 +9,7 @@ import android.content.*
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.database.ContentObserver
+import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Typeface
@@ -33,7 +34,6 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.core.graphics.toColorInt
 import androidx.recyclerview.widget.*
-import com.example.mydashcam.views.GMeterView
 import com.example.mydashcam.views.StorageRingView
 import com.example.mydashcam.utils.StorageManager
 import kotlinx.coroutines.Dispatchers
@@ -56,11 +56,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var iconToggleRecord: ImageView
     private lateinit var btnLockFile: CardView
     private lateinit var btnSettings: ImageButton
+    private lateinit var btnTripJournal: ImageButton
     private lateinit var statusText: TextView
     private lateinit var recyclerView: RecyclerView
     private lateinit var storageRing: StorageRingView
-
-    private lateinit var gMeterView: GMeterView // НОВОЕ: Виджет G-метра
 
     private lateinit var btnTabTemp: TextView
     private lateinit var btnTabSaved: TextView
@@ -77,11 +76,6 @@ class MainActivity : AppCompatActivity() {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             cameraServiceBinder = service as CameraService.LocalBinder
 
-            // Подключаем радар к потоку сенсоров
-            cameraServiceBinder?.gForceCallback = { latG, lonG ->
-                runOnUiThread { gMeterView.updateG(latG, lonG) }
-            }
-
             cameraServiceBinder?.setPreviewListener { bitmap, rotationDegrees ->
                 runOnUiThread {
                     if (previewImageView.isAvailable) {
@@ -91,7 +85,7 @@ class MainActivity : AppCompatActivity() {
 
                         if (viewWidth > 0 && viewHeight > 0) {
                             val canvas = previewImageView.lockCanvas() ?: return@runOnUiThread
-                            canvas.drawColor(android.graphics.Color.BLACK)
+                            canvas.drawColor(Color.BLACK)
                             val matrix = Matrix()
                             val bw = bitmap.width.toFloat()
                             val bh = bitmap.height.toFloat()
@@ -121,7 +115,6 @@ class MainActivity : AppCompatActivity() {
 
         override fun onServiceDisconnected(name: ComponentName?) {
             cameraServiceBinder?.setPreviewListener(null)
-            cameraServiceBinder?.gForceCallback = null
             cameraServiceBinder = null
         }
     }
@@ -165,6 +158,7 @@ class MainActivity : AppCompatActivity() {
         iconToggleRecord = findViewById(R.id.iconToggleRecord)
         btnLockFile = findViewById(R.id.btnLockFile)
         btnSettings = findViewById(R.id.btnSettings)
+        btnTripJournal = findViewById(R.id.btnTripJournal)
         statusText = findViewById(R.id.statusText)
         recyclerView = findViewById(R.id.recyclerViewVideos)
         storageRing = findViewById(R.id.storageRing)
@@ -177,17 +171,14 @@ class MainActivity : AppCompatActivity() {
         adapter = VideoAdapter()
         recyclerView.adapter = adapter
 
-        // НОВОЕ: Рисуем G-Метр поверх видео (размер 250x250, справа по центру)
-        gMeterView = GMeterView(this).apply { visibility = View.GONE }
-        val gParams = FrameLayout.LayoutParams(250, 250).apply {
-            gravity = Gravity.CENTER_VERTICAL or Gravity.END
-            rightMargin = 60
-        }
-        addContentView(gMeterView, gParams)
-
         btnTabTemp.setOnClickListener { switchTab(TabState.TIMELINE) }
         btnTabSaved.setOnClickListener { switchTab(TabState.PROTECTED) }
         btnTabPreview.setOnClickListener { switchTab(TabState.PREVIEW) }
+
+        // ИСПРАВЛЕНО: Запускаем отдельную Activity
+        btnTripJournal.setOnClickListener {
+            startActivity(Intent(this, TripJournalActivity::class.java))
+        }
 
         btnToggleRecord.setOnClickListener {
             if (!hasPermissions()) {
@@ -271,7 +262,6 @@ class MainActivity : AppCompatActivity() {
             tabLayout.visibility = View.GONE
             recyclerView.visibility = View.GONE
             previewImageView.visibility = View.VISIBLE
-            gMeterView.visibility = View.GONE // Скрываем радар в PiP
         } else {
             controlCard.visibility = View.VISIBLE
             tabLayout.visibility = View.VISIBLE
@@ -377,7 +367,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun switchTab(tab: TabState) {
         currentTab = tab
-        val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
         val active = ContextCompat.getColor(this, R.color.text_active)
         val inactive = ContextCompat.getColor(this, R.color.text_inactive)
 
@@ -391,11 +380,8 @@ class MainActivity : AppCompatActivity() {
         if (tab == TabState.PREVIEW) {
             recyclerView.visibility = View.GONE
             previewImageView.visibility = View.VISIBLE
-            // Показываем G-Метр, только если он включен
-            if (prefs.getBoolean("pref_stamp_gforce", false)) gMeterView.visibility = View.VISIBLE
         } else {
             previewImageView.visibility = View.GONE
-            gMeterView.visibility = View.GONE
             recyclerView.visibility = View.VISIBLE
             if (hasPermissions()) loadVideos()
         }
@@ -485,7 +471,9 @@ class MainActivity : AppCompatActivity() {
             val swStampDate = SwitchCompat(this).apply { text = if(cLang == "ru") "Дата и Время" else "Date & Time"; isChecked = prefs.getBoolean("pref_stamp_date", true) }
             val swStampSpeed = SwitchCompat(this).apply { text = if(cLang == "ru") "Скорость (км/ч)" else "Speed (km/h)"; isChecked = prefs.getBoolean("pref_stamp_speed", false); setPadding(0, 16, 0, 0) }
             val swStampGps = SwitchCompat(this).apply { text = if(cLang == "ru") "Координаты (GPS)" else "GPS Coordinates"; isChecked = prefs.getBoolean("pref_stamp_gps", false); setPadding(0, 16, 0, 0) }
-            val swStampGForce = SwitchCompat(this).apply { text = if(cLang == "ru") "G-Сенсор (Радар + Субтитры)" else "G-Sensor (Radar + Subtitles)"; isChecked = prefs.getBoolean("pref_stamp_gforce", false); setPadding(0, 16, 0, 0) }
+
+            val swStampGForce = SwitchCompat(this).apply { text = if(cLang == "ru") "G-Сенсор (Субтитры)" else "G-Sensor (Subtitles)"; isChecked = prefs.getBoolean("pref_stamp_gforce", false); setPadding(0, 16, 0, 0) }
+
             layout.addView(swStampDate); layout.addView(swStampSpeed); layout.addView(swStampGps); layout.addView(swStampGForce)
 
             // ОБЪЕКТИВ
@@ -592,7 +580,7 @@ class MainActivity : AppCompatActivity() {
                         putBoolean("pref_stamp_date", swStampDate.isChecked)
                         putBoolean("pref_stamp_speed", swStampSpeed.isChecked)
                         putBoolean("pref_stamp_gps", swStampGps.isChecked)
-                        putBoolean("pref_stamp_gforce", swStampGForce.isChecked) // Сохраняем тумблер
+                        putBoolean("pref_stamp_gforce", swStampGForce.isChecked)
                         putString("pref_camera", cCam)
                         putString("pref_resolution", sR)
                         putInt("pref_fps", if(rb6.isChecked) 60 else 30)
@@ -601,8 +589,9 @@ class MainActivity : AppCompatActivity() {
                     }
                     if (sL != cLang) setAppLocale(sL) else { updateUiState(); if (hasPermissions() && !CameraService.isRecordingActive) { try { startForegroundService(Intent(this@MainActivity, CameraService::class.java).apply { action = CameraService.ACTION_STANDBY }) } catch (_: Exception) {} } }
 
-                    // Показываем радар, если включили в настройках
-                    gMeterView.visibility = if (currentTab == TabState.PREVIEW && swStampGForce.isChecked) View.VISIBLE else View.GONE
+                    if ((swStampSpeed.isChecked || swStampGps.isChecked) && ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                        requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 102)
+                    }
                 }
             if (!isFirstRun) dialogBuilder.setNegativeButton(getString(R.string.btn_cancel), null)
             dialogBuilder.show()

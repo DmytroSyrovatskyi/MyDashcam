@@ -56,5 +56,22 @@
     <string name="toast_storage_critical">CRITICAL: Storage full! Recording stopped.</string>
     <string name="toast_storage_warning">WARNING: Phone storage is almost full!</string>
 
+    <string name="desc_trip_journal">Trip Journal</string>
+
+    <string name="desc_back">Back</string>
+    <string name="desc_clear_all">Clear all</string>
+    <string name="filter_today">TODAY</string>
+    <string name="filter_week">WEEK</string>
+    <string name="filter_month">MONTH</string>
+    <string name="filter_calendar">📅</string>
+
+    <string name="desc_export">Export Journal</string>
+    <string name="msg_export_success">Saved to Downloads/DashcamBackups</string>
+    <string name="msg_export_empty">Journal is empty!</string>
+
+    <string name="desc_import">Import Journal</string>
+    <string name="msg_import_success">Imported %1$d trips</string>
+    <string name="msg_import_error">Import error: Invalid file</string>
+
 
 </resources>

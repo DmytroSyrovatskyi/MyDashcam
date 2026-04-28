@@ -13,7 +13,6 @@
         tools:ignore="all" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
     <uses-permission
@@ -58,6 +57,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".TripJournalActivity"
+            android:exported="false"
+            android:theme="@style/Theme.MyDashcam" />
 
         <service
             android:name=".CameraService"

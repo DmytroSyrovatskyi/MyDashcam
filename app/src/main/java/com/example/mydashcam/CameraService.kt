@@ -40,6 +40,8 @@ import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import com.example.mydashcam.utils.NotificationHelper
 import com.example.mydashcam.utils.StorageManager
+import com.example.mydashcam.utils.TripDatabaseHelper
+import com.example.mydashcam.utils.TripRecord
 import kotlinx.coroutines.*
 import java.io.OutputStream
 import java.text.SimpleDateFormat
@@ -83,25 +85,32 @@ class CameraService : LifecycleService() {
     private var prefStampGps = false
     private var prefStampGForce = false
 
+    // Локация и Скорость
     private var locationManager: LocationManager? = null
     private var lastLocation: Location? = null
     private var currentSpeedKmH = 0f
-    private var smoothedSpeedKmH = 0f // НОВОЕ: Для фильтра сглаживания скорости
+    private var smoothedSpeedKmH = 0f
     private var currentLat = 0.0
     private var currentLon = 0.0
 
+    // Акселерометр
     private var sensorManager: SensorManager? = null
     private var linearAccelSensor: Sensor? = null
     private var currentLatG = 0f
     private var currentLonG = 0f
+
+    // НОВОЕ: Переменные для Журнала Поездок (Одометра)
+    private var dbHelper: TripDatabaseHelper? = null
+    private var tripStartTime = 0L
+    private var tripDistanceMeters = 0f
+    private var tripMaxSpeedKmh = 0f
+    private var tripMaxGForce = 0f
 
     private var previewCallback: ((Bitmap, Int) -> Unit)? = null
     private var reusableBitmap: Bitmap? = null
     private val binder = LocalBinder()
 
     inner class LocalBinder : Binder() {
-        var gForceCallback: ((Float, Float) -> Unit)? = null
-
         fun setPreviewListener(listener: ((Bitmap, Int) -> Unit)?) {
             previewCallback = listener
         }
@@ -148,25 +157,29 @@ class CameraService : LifecycleService() {
         }
     }
 
-    // НОВОЕ: Умный спидометр с автомобильным фильтром
+    // НОВОЕ: Спидометр с фильтром + Сборщик пробега
     private val locationListener = LocationListener { location ->
         var rawSpeedKmH = 0f
 
-        if (location.hasSpeed()) {
-            rawSpeedKmH = location.speed * 3.6f
-        } else {
-            lastLocation?.let {
+        lastLocation?.let {
+            val dist = location.distanceTo(it)
+            tripDistanceMeters += dist // Плюсуем дистанцию к поездке
+
+            rawSpeedKmH = if (location.hasSpeed()) {
+                location.speed * 3.6f
+            } else {
                 val timeDeltaSec = (location.time - it.time) / 1000f
                 if (timeDeltaSec >= 1.0f) {
-                    val distanceMeters = location.distanceTo(it)
-                    rawSpeedKmH = (distanceMeters / timeDeltaSec) * 3.6f
+                    (dist / timeDeltaSec) * 3.6f
                 } else {
-                    rawSpeedKmH = smoothedSpeedKmH
+                    smoothedSpeedKmH
                 }
             }
+        } ?: run {
+            if (location.hasSpeed()) rawSpeedKmH = location.speed * 3.6f
         }
 
-        // Фильтр сглаживания
+        // Фильтр сглаживания (чистый код)
         smoothedSpeedKmH = if (smoothedSpeedKmH == 0f && rawSpeedKmH > 5f) {
             rawSpeedKmH
         } else {
@@ -179,11 +192,14 @@ class CameraService : LifecycleService() {
         }
 
         currentSpeedKmH = smoothedSpeedKmH
+        if (currentSpeedKmH > tripMaxSpeedKmh) tripMaxSpeedKmh = currentSpeedKmH
+
         currentLat = location.latitude
         currentLon = location.longitude
         lastLocation = location
     }
 
+    // НОВОЕ: Очищенный сенсор (только сбор телеметрии)
     private val sensorListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
             val rawLatG = event.values[0] / 9.81f
@@ -192,7 +208,9 @@ class CameraService : LifecycleService() {
             currentLatG = currentLatG * 0.8f + rawLatG * 0.2f
             currentLonG = currentLonG * 0.8f + rawLonG * 0.2f
 
-            binder.gForceCallback?.invoke(currentLatG, currentLonG)
+            // Ловим максимальную перегрузку за поездку
+            val maxG = maxOf(kotlin.math.abs(currentLatG), kotlin.math.abs(currentLonG))
+            if (maxG > tripMaxGForce) tripMaxGForce = maxG
         }
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     }
@@ -202,6 +220,8 @@ class CameraService : LifecycleService() {
         powerManager = getSystemService(POWER_SERVICE) as PowerManager
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        dbHelper = TripDatabaseHelper(this) // Подключаем базу данных
+
         setupThermalListener()
         setupOrientationListener()
 
@@ -245,6 +265,7 @@ class CameraService : LifecycleService() {
         val listener = PowerManager.OnThermalStatusChangedListener { status ->
             isThermalDowngradeActive = status >= PowerManager.THERMAL_STATUS_SEVERE
             if (status >= PowerManager.THERMAL_STATUS_CRITICAL && isRecordingActive) {
+                saveTripData() // Спасаем поездку перед экстренным выключением
                 stopHardware()
                 isRecordingActive = false
                 updateNotification()
@@ -269,6 +290,30 @@ class CameraService : LifecycleService() {
         orientationEventListener?.enable()
     }
 
+    // НОВОЕ: Функция сохранения данных в Одометр
+    private fun saveTripData() {
+        if (tripStartTime > 0) {
+            val tripEndTime = System.currentTimeMillis()
+            // Сохраняем, только если проехали больше 50 метров (отсекаем мусор)
+            if (tripDistanceMeters > 50f) {
+                dbHelper?.insertTrip(
+                    TripRecord(
+                        startTime = tripStartTime,
+                        endTime = tripEndTime,
+                        distanceMeters = tripDistanceMeters,
+                        maxSpeedKmh = tripMaxSpeedKmh,
+                        maxGForce = tripMaxGForce
+                    )
+                )
+            }
+            // Сбрасываем счетчики до следующей поездки
+            tripStartTime = 0L
+            tripDistanceMeters = 0f
+            tripMaxSpeedKmh = 0f
+            tripMaxGForce = 0f
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         updateNotification()
@@ -278,11 +323,19 @@ class CameraService : LifecycleService() {
                 isRecordingActive = true
                 isoEma = minHardwareIso
                 recordingStartTime = System.currentTimeMillis()
+
+                // Старт счетчиков поездки
+                tripStartTime = System.currentTimeMillis()
+                tripDistanceMeters = 0f
+                tripMaxSpeedKmh = 0f
+                tripMaxGForce = 0f
+
                 loadPrefs()
                 startLocationTracking()
                 startHardwareLoop()
             }
             ACTION_STOP -> if (isRecordingActive) {
+                saveTripData() // Сохраняем поездку при нормальной остановке
                 isRecordingActive = false
                 recordingStartTime = 0L
                 playStopSound()
@@ -293,7 +346,11 @@ class CameraService : LifecycleService() {
             }
             ACTION_LOCK -> executeLock()
             ACTION_EXIT -> {
-                if (isRecordingActive) { isRecordingActive = false; stopHardware() }
+                if (isRecordingActive) {
+                    saveTripData()
+                    isRecordingActive = false
+                    stopHardware()
+                }
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 Process.killProcess(Process.myPid())
@@ -381,7 +438,7 @@ class CameraService : LifecycleService() {
                     if (prefStampDate) parts.add(SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(System.currentTimeMillis()))
                     if (prefStampSpeed) parts.add(String.format(Locale.US, "%d km/h", currentSpeedKmH.toInt()))
 
-                    // НОВОЕ: Минималистичные субтитры G-Сенсора
+                    // Простые субтитры G-сенсора
                     if (prefStampGForce) {
                         if (currentLonG > 0.2f) parts.add("G+")
                         else if (currentLonG < -0.2f) parts.add("G-")
@@ -423,6 +480,7 @@ class CameraService : LifecycleService() {
         if (!isRecordingActive) return
 
         if (!StorageManager.checkStorageSpace(this)) {
+            saveTripData() // Спасаем поездку, если кончилась память
             isRecordingActive = false; recordingStartTime = 0L; playStopSound(); stopHardware(); stopLocationTracking(); updateNotification(); return
         }
 

@@ -55,4 +55,21 @@
 
     <string name="toast_storage_critical">КРИТИЧЕСКИ МАЛО ПАМЯТИ! Запись остановлена.</string>
     <string name="toast_storage_warning">ВНИМАНИЕ: Память телефона почти заполнена!</string>
+
+    <string name="desc_trip_journal">Журнал поездок</string>
+
+    <string name="desc_back">Назад</string>
+    <string name="desc_clear_all">Очистить всё</string>
+    <string name="filter_today">СЕГОДНЯ</string>
+    <string name="filter_week">НЕДЕЛЯ</string>
+    <string name="filter_month">МЕСЯЦ</string>
+    <string name="filter_calendar">📅</string>
+
+    <string name="desc_export">Экспорт журнала</string>
+    <string name="msg_export_success">Сохранено в Загрузки/DashcamBackups</string>
+    <string name="msg_export_empty">Журнал пуст!</string>
+
+    <string name="desc_import">Импорт журнала</string>
+    <string name="msg_import_success">Импортировано %1$d поездок</string>
+    <string name="msg_import_error">Ошибка: неверный формат файла</string>
 </resources>
