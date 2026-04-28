@@ -14,6 +14,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
     <uses-permission
         android:name="android.permission.READ_MEDIA_VIDEO"
         tools:ignore="all" />
@@ -61,7 +63,7 @@
             android:name=".CameraService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="camera|microphone"
+            android:foregroundServiceType="camera|microphone|location"
             tools:ignore="all" />
 
     </application>

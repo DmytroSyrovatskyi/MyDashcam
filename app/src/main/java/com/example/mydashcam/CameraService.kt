@@ -10,7 +10,12 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.hardware.camera2.*
+import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.media.*
@@ -76,17 +81,27 @@ class CameraService : LifecycleService() {
     private var prefStampDate = true
     private var prefStampSpeed = false
     private var prefStampGps = false
+    private var prefStampGForce = false
 
     private var locationManager: LocationManager? = null
+    private var lastLocation: Location? = null
     private var currentSpeedKmH = 0f
+    private var smoothedSpeedKmH = 0f // НОВОЕ: Для фильтра сглаживания скорости
     private var currentLat = 0.0
     private var currentLon = 0.0
+
+    private var sensorManager: SensorManager? = null
+    private var linearAccelSensor: Sensor? = null
+    private var currentLatG = 0f
+    private var currentLonG = 0f
 
     private var previewCallback: ((Bitmap, Int) -> Unit)? = null
     private var reusableBitmap: Bitmap? = null
     private val binder = LocalBinder()
 
     inner class LocalBinder : Binder() {
+        var gForceCallback: ((Float, Float) -> Unit)? = null
+
         fun setPreviewListener(listener: ((Bitmap, Int) -> Unit)?) {
             previewCallback = listener
         }
@@ -133,17 +148,60 @@ class CameraService : LifecycleService() {
         }
     }
 
-    // Слушатель GPS через лямбду
+    // НОВОЕ: Умный спидометр с автомобильным фильтром
     private val locationListener = LocationListener { location ->
-        currentSpeedKmH = if (location.hasSpeed()) location.speed * 3.6f else 0f
+        var rawSpeedKmH = 0f
+
+        if (location.hasSpeed()) {
+            rawSpeedKmH = location.speed * 3.6f
+        } else {
+            lastLocation?.let {
+                val timeDeltaSec = (location.time - it.time) / 1000f
+                if (timeDeltaSec >= 1.0f) {
+                    val distanceMeters = location.distanceTo(it)
+                    rawSpeedKmH = (distanceMeters / timeDeltaSec) * 3.6f
+                } else {
+                    rawSpeedKmH = smoothedSpeedKmH
+                }
+            }
+        }
+
+        // Фильтр сглаживания
+        smoothedSpeedKmH = if (smoothedSpeedKmH == 0f && rawSpeedKmH > 5f) {
+            rawSpeedKmH
+        } else {
+            (smoothedSpeedKmH * 0.6f) + (rawSpeedKmH * 0.4f)
+        }
+
+        // Мертвая зона
+        if (smoothedSpeedKmH < 3f) {
+            smoothedSpeedKmH = 0f
+        }
+
+        currentSpeedKmH = smoothedSpeedKmH
         currentLat = location.latitude
         currentLon = location.longitude
+        lastLocation = location
+    }
+
+    private val sensorListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            val rawLatG = event.values[0] / 9.81f
+            val rawLonG = event.values[2] / 9.81f
+
+            currentLatG = currentLatG * 0.8f + rawLatG * 0.2f
+            currentLonG = currentLonG * 0.8f + rawLonG * 0.2f
+
+            binder.gForceCallback?.invoke(currentLatG, currentLonG)
+        }
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     }
 
     override fun onCreate() {
         super.onCreate()
         powerManager = getSystemService(POWER_SERVICE) as PowerManager
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         setupThermalListener()
         setupOrientationListener()
 
@@ -166,6 +224,7 @@ class CameraService : LifecycleService() {
         prefStampDate = prefs.getBoolean("pref_stamp_date", true)
         prefStampSpeed = prefs.getBoolean("pref_stamp_speed", false)
         prefStampGps = prefs.getBoolean("pref_stamp_gps", false)
+        prefStampGForce = prefs.getBoolean("pref_stamp_gforce", false)
     }
 
     @SuppressLint("MissingPermission")
@@ -173,10 +232,13 @@ class CameraService : LifecycleService() {
         if ((prefStampSpeed || prefStampGps) && ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             try { locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener) } catch (_: Exception) {}
         }
+        linearAccelSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
+        sensorManager?.registerListener(sensorListener, linearAccelSensor, SensorManager.SENSOR_DELAY_UI)
     }
 
     private fun stopLocationTracking() {
         try { locationManager?.removeUpdates(locationListener) } catch (_: Exception) {}
+        try { sensorManager?.unregisterListener(sensorListener) } catch (_: Exception) {}
     }
 
     private fun setupThermalListener() {
@@ -275,7 +337,11 @@ class CameraService : LifecycleService() {
             progressPercent = currentFileProgress
         )
 
-        startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+        startForeground(
+            1,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+        )
     }
 
     private fun formatSrtTime(seconds: Int): String {
@@ -307,13 +373,20 @@ class CameraService : LifecycleService() {
                 val baseBitrate = (15_000_000f + (8_000_000f * darkness)) * resMult * fpsMult * codecMult
                 nextTargetBitrate = if (isThermalDowngradeActive) (baseBitrate * 0.7f).toInt() else baseBitrate.toInt()
 
-                if (srtOutputStream != null && (prefStampDate || prefStampSpeed || prefStampGps)) {
+                if (srtOutputStream != null && (prefStampDate || prefStampSpeed || prefStampGps || prefStampGForce)) {
                     val startT = formatSrtTime(srtCounter)
                     val endT = formatSrtTime(srtCounter + 1)
                     val parts = mutableListOf<String>()
 
                     if (prefStampDate) parts.add(SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(System.currentTimeMillis()))
                     if (prefStampSpeed) parts.add(String.format(Locale.US, "%d km/h", currentSpeedKmH.toInt()))
+
+                    // НОВОЕ: Минималистичные субтитры G-Сенсора
+                    if (prefStampGForce) {
+                        if (currentLonG > 0.2f) parts.add("G+")
+                        else if (currentLonG < -0.2f) parts.add("G-")
+                    }
+
                     if (prefStampGps) parts.add(String.format(Locale.US, "%.5f, %.5f", currentLat, currentLon))
 
                     if (parts.isNotEmpty()) {
@@ -388,7 +461,6 @@ class CameraService : LifecycleService() {
                 val sizes = chars?.getOutputSizes(MediaRecorder::class.java) ?: emptyArray()
                 val reqW = if(prefResolution == "4k") 3840 else if(prefResolution == "720") 1280 else 1920
 
-                // ИСПРАВЛЕНО: Жесткий фильтр соотношения сторон 16:9 (избегаем 4:3, как в логе 1920x1440)
                 val bestSize = sizes
                     .filter { it.width >= reqW && kotlin.math.abs(it.width.toFloat() / it.height.toFloat() - 16f/9f) < 0.1f }
                     .minByOrNull { it.width }
@@ -479,7 +551,7 @@ class CameraService : LifecycleService() {
 
             pfd = contentResolver.openFileDescriptor(currentVideoUri!!, "rw")
 
-            if (prefStampDate || prefStampSpeed || prefStampGps) {
+            if (prefStampDate || prefStampSpeed || prefStampGps || prefStampGForce) {
                 val srtUri = contentResolver.insert(MediaStore.Files.getContentUri("external"), ContentValues().apply {
                     put(MediaStore.Files.FileColumns.DISPLAY_NAME, srtName)
                     put(MediaStore.Files.FileColumns.MIME_TYPE, "application/x-subrip")
@@ -493,13 +565,10 @@ class CameraService : LifecycleService() {
                 setVideoSource(MediaRecorder.VideoSource.SURFACE)
                 setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                 setVideoEncoder(if (prefCodec == "hevc" || prefCodec == "auto") MediaRecorder.VideoEncoder.HEVC else MediaRecorder.VideoEncoder.H264)
-
-                // ИСПРАВЛЕНО: Восстанавливаем качество звука
                 setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setAudioChannels(1) // Моно
-                setAudioSamplingRate(48000) // 48 kHz
-                setAudioEncodingBitRate(128000) // 128 kbps
-
+                setAudioChannels(1)
+                setAudioSamplingRate(48000)
+                setAudioEncodingBitRate(128000)
                 setVideoEncodingBitRate(nextTargetBitrate)
                 setVideoFrameRate(prefFps)
                 setVideoSize(w, h)
