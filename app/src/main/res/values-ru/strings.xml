@@ -72,4 +72,13 @@
     <string name="desc_import">Импорт журнала</string>
     <string name="msg_import_success">Импортировано %1$d поездок</string>
     <string name="msg_import_error">Ошибка: неверный формат файла</string>
+
+
+    <string name="desc_cloud_sync">Синхронизация</string>
+    <string name="cloud_title">Синхронизация с Google Drive</string>
+    <string name="cloud_status_not_signed">Вы не вошли в аккаунт</string>
+    <string name="cloud_btn_sign_in">Войти через Google</string>
+    <string name="cloud_btn_sign_out">Выйти</string>
+    <string name="cloud_btn_backup">⬆️ Выгрузить в облако</string>
+    <string name="cloud_btn_restore">⬇️ Загрузить из облака</string>
 </resources>

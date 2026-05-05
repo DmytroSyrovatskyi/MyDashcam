@@ -2,11 +2,8 @@ package com.example.mydashcam
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.content.BroadcastReceiver
 import android.content.ContentValues
-import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
@@ -54,7 +51,6 @@ class CameraService : LifecycleService() {
     private var mediaRecorder: MediaRecorder? = null
     private var pfd: ParcelFileDescriptor? = null
     private var srtOutputStream: OutputStream? = null
-    private var loopJob: Job? = null
     private var dynamicUpdateJob: Job? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var cameraControl: CameraControl? = null
@@ -69,6 +65,8 @@ class CameraService : LifecycleService() {
     private var deviceOrientationAngle = 0
 
     private var recordingStartTime = 0L
+    private var actualRecordingStartTime = 0L
+    private var currentSrtSecond = 0
 
     private var isoEma = 100f
     private var minHardwareIso = 100f
@@ -85,7 +83,6 @@ class CameraService : LifecycleService() {
     private var prefStampGps = false
     private var prefStampGForce = false
 
-    // Локация и Скорость
     private var locationManager: LocationManager? = null
     private var lastLocation: Location? = null
     private var currentSpeedKmH = 0f
@@ -93,13 +90,11 @@ class CameraService : LifecycleService() {
     private var currentLat = 0.0
     private var currentLon = 0.0
 
-    // Акселерометр
     private var sensorManager: SensorManager? = null
     private var linearAccelSensor: Sensor? = null
     private var currentLatG = 0f
     private var currentLonG = 0f
 
-    // НОВОЕ: Переменные для Журнала Поездок (Одометра)
     private var dbHelper: TripDatabaseHelper? = null
     private var tripStartTime = 0L
     private var tripDistanceMeters = 0f
@@ -135,35 +130,12 @@ class CameraService : LifecycleService() {
         const val RECORDING_DURATION_MS = 600000L
     }
 
-    private val powerReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
-            if (!prefs.getBoolean("pref_autostart", false)) return
-
-            when (intent?.action) {
-                Intent.ACTION_POWER_CONNECTED -> {
-                    if (!isRecordingActive) {
-                        Toast.makeText(this@CameraService, "Auto-Start: Power Connected", Toast.LENGTH_SHORT).show()
-                        startService(Intent(this@CameraService, CameraService::class.java).apply { action = ACTION_START })
-                    }
-                }
-                Intent.ACTION_POWER_DISCONNECTED -> {
-                    if (isRecordingActive) {
-                        Toast.makeText(this@CameraService, "Auto-Stop: Power Disconnected", Toast.LENGTH_SHORT).show()
-                        startService(Intent(this@CameraService, CameraService::class.java).apply { action = ACTION_STOP })
-                    }
-                }
-            }
-        }
-    }
-
-    // НОВОЕ: Спидометр с фильтром + Сборщик пробега
     private val locationListener = LocationListener { location ->
         var rawSpeedKmH = 0f
 
         lastLocation?.let {
             val dist = location.distanceTo(it)
-            tripDistanceMeters += dist // Плюсуем дистанцию к поездке
+            tripDistanceMeters += dist
 
             rawSpeedKmH = if (location.hasSpeed()) {
                 location.speed * 3.6f
@@ -179,14 +151,12 @@ class CameraService : LifecycleService() {
             if (location.hasSpeed()) rawSpeedKmH = location.speed * 3.6f
         }
 
-        // Фильтр сглаживания (чистый код)
         smoothedSpeedKmH = if (smoothedSpeedKmH == 0f && rawSpeedKmH > 5f) {
             rawSpeedKmH
         } else {
             (smoothedSpeedKmH * 0.6f) + (rawSpeedKmH * 0.4f)
         }
 
-        // Мертвая зона
         if (smoothedSpeedKmH < 3f) {
             smoothedSpeedKmH = 0f
         }
@@ -199,7 +169,6 @@ class CameraService : LifecycleService() {
         lastLocation = location
     }
 
-    // НОВОЕ: Очищенный сенсор (только сбор телеметрии)
     private val sensorListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
             val rawLatG = event.values[0] / 9.81f
@@ -208,7 +177,6 @@ class CameraService : LifecycleService() {
             currentLatG = currentLatG * 0.8f + rawLatG * 0.2f
             currentLonG = currentLonG * 0.8f + rawLonG * 0.2f
 
-            // Ловим максимальную перегрузку за поездку
             val maxG = maxOf(kotlin.math.abs(currentLatG), kotlin.math.abs(currentLonG))
             if (maxG > tripMaxGForce) tripMaxGForce = maxG
         }
@@ -220,17 +188,10 @@ class CameraService : LifecycleService() {
         powerManager = getSystemService(POWER_SERVICE) as PowerManager
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
-        dbHelper = TripDatabaseHelper(this) // Подключаем базу данных
+        dbHelper = TripDatabaseHelper(this)
 
         setupThermalListener()
         setupOrientationListener()
-
-        val filter = IntentFilter().apply {
-            addAction(Intent.ACTION_POWER_CONNECTED)
-            addAction(Intent.ACTION_POWER_DISCONNECTED)
-        }
-        registerReceiver(powerReceiver, filter)
-
         loadPrefs()
     }
 
@@ -249,8 +210,16 @@ class CameraService : LifecycleService() {
 
     @SuppressLint("MissingPermission")
     private fun startLocationTracking() {
-        if ((prefStampSpeed || prefStampGps) && ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-            try { locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener) } catch (_: Exception) {}
+        if (prefStampSpeed || prefStampGps) {
+            val isGpsEnabled = locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true
+            if (!isGpsEnabled) {
+                // ИСПРАВЛЕНИЕ: Предупреждение о выключенном GPS
+                Handler(Looper.getMainLooper()).post {
+                    Toast.makeText(this, "⚠️ Включите Локацию (GPS) для скорости!", Toast.LENGTH_LONG).show()
+                }
+            } else if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                try { locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener) } catch (_: Exception) {}
+            }
         }
         linearAccelSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
         sensorManager?.registerListener(sensorListener, linearAccelSensor, SensorManager.SENSOR_DELAY_UI)
@@ -265,7 +234,7 @@ class CameraService : LifecycleService() {
         val listener = PowerManager.OnThermalStatusChangedListener { status ->
             isThermalDowngradeActive = status >= PowerManager.THERMAL_STATUS_SEVERE
             if (status >= PowerManager.THERMAL_STATUS_CRITICAL && isRecordingActive) {
-                saveTripData() // Спасаем поездку перед экстренным выключением
+                saveTripData()
                 stopHardware()
                 isRecordingActive = false
                 updateNotification()
@@ -290,11 +259,9 @@ class CameraService : LifecycleService() {
         orientationEventListener?.enable()
     }
 
-    // НОВОЕ: Функция сохранения данных в Одометр
     private fun saveTripData() {
         if (tripStartTime > 0) {
             val tripEndTime = System.currentTimeMillis()
-            // Сохраняем, только если проехали больше 50 метров (отсекаем мусор)
             if (tripDistanceMeters > 50f) {
                 dbHelper?.insertTrip(
                     TripRecord(
@@ -306,7 +273,6 @@ class CameraService : LifecycleService() {
                     )
                 )
             }
-            // Сбрасываем счетчики до следующей поездки
             tripStartTime = 0L
             tripDistanceMeters = 0f
             tripMaxSpeedKmh = 0f
@@ -324,7 +290,6 @@ class CameraService : LifecycleService() {
                 isoEma = minHardwareIso
                 recordingStartTime = System.currentTimeMillis()
 
-                // Старт счетчиков поездки
                 tripStartTime = System.currentTimeMillis()
                 tripDistanceMeters = 0f
                 tripMaxSpeedKmh = 0f
@@ -335,7 +300,7 @@ class CameraService : LifecycleService() {
                 startHardwareLoop()
             }
             ACTION_STOP -> if (isRecordingActive) {
-                saveTripData() // Сохраняем поездку при нормальной остановке
+                saveTripData()
                 isRecordingActive = false
                 recordingStartTime = 0L
                 playStopSound()
@@ -405,14 +370,38 @@ class CameraService : LifecycleService() {
         return String.format(Locale.US, "%02d:%02d:%02d,000", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
     }
 
+    private fun writeSrtBlock(second: Int) {
+        if (srtOutputStream == null || (!prefStampDate && !prefStampSpeed && !prefStampGps && !prefStampGForce)) return
+
+        val startT = formatSrtTime(second)
+        val endT = formatSrtTime(second + 1)
+        val parts = mutableListOf<String>()
+
+        if (prefStampDate) parts.add(SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(System.currentTimeMillis()))
+        if (prefStampSpeed) parts.add(String.format(Locale.US, "%d km/h", currentSpeedKmH.toInt()))
+
+        if (prefStampGForce) {
+            if (currentLonG > 0.2f) parts.add("G+")
+            else if (currentLonG < -0.2f) parts.add("G-")
+        }
+
+        if (prefStampGps) parts.add(String.format(Locale.US, "%.5f, %.5f", currentLat, currentLon))
+
+        if (parts.isNotEmpty()) {
+            val textLine = parts.joinToString("  |  ")
+            val block = "${second + 1}\n$startT --> $endT\n$textLine\n\n"
+            try { srtOutputStream?.write(block.toByteArray()) } catch (_: Exception) {}
+        }
+    }
+
     private fun startDynamicUpdates() {
         dynamicUpdateJob?.cancel()
         dynamicUpdateJob = lifecycleScope.launch {
             var currEv = 0.0f
-            var srtCounter = 0
 
             while (isRecordingActive) {
-                delay(1000)
+                delay(500)
+                if (actualRecordingStartTime == 0L) continue
 
                 val darkness = ((isoEma - minHardwareIso) / (maxHardwareIso - minHardwareIso)).coerceIn(0f, 1f)
                 val targetEV = 0.0f - (1.5f * darkness)
@@ -430,32 +419,15 @@ class CameraService : LifecycleService() {
                 val baseBitrate = (15_000_000f + (8_000_000f * darkness)) * resMult * fpsMult * codecMult
                 nextTargetBitrate = if (isThermalDowngradeActive) (baseBitrate * 0.7f).toInt() else baseBitrate.toInt()
 
-                if (srtOutputStream != null && (prefStampDate || prefStampSpeed || prefStampGps || prefStampGForce)) {
-                    val startT = formatSrtTime(srtCounter)
-                    val endT = formatSrtTime(srtCounter + 1)
-                    val parts = mutableListOf<String>()
+                val elapsedMillis = System.currentTimeMillis() - actualRecordingStartTime
+                val targetSrtCount = (elapsedMillis / 1000).toInt()
 
-                    if (prefStampDate) parts.add(SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(System.currentTimeMillis()))
-                    if (prefStampSpeed) parts.add(String.format(Locale.US, "%d km/h", currentSpeedKmH.toInt()))
-
-                    // Простые субтитры G-сенсора
-                    if (prefStampGForce) {
-                        if (currentLonG > 0.2f) parts.add("G+")
-                        else if (currentLonG < -0.2f) parts.add("G-")
-                    }
-
-                    if (prefStampGps) parts.add(String.format(Locale.US, "%.5f, %.5f", currentLat, currentLon))
-
-                    if (parts.isNotEmpty()) {
-                        val textLine = parts.joinToString("  |  ")
-                        val block = "${srtCounter + 1}\n$startT --> $endT\n$textLine\n\n"
-                        try { srtOutputStream?.write(block.toByteArray()) } catch (_: Exception) {}
-                    }
+                while (currentSrtSecond <= targetSrtCount && isRecordingActive) {
+                    writeSrtBlock(currentSrtSecond)
+                    currentSrtSecond++
                 }
-                srtCounter++
 
-                val elapsed = System.currentTimeMillis() - recordingStartTime
-                val fileProgress = ((elapsed.toFloat() / RECORDING_DURATION_MS) * 100).toInt()
+                val fileProgress = ((elapsedMillis.toFloat() / RECORDING_DURATION_MS) * 100).toInt()
                 updateNotification(fileProgress)
             }
         }
@@ -476,11 +448,17 @@ class CameraService : LifecycleService() {
         }
     }
 
+    private fun executeLoopNextFile() {
+        if (!isRecordingActive) return
+        stopHardware()
+        startHardwareLoop()
+    }
+
     private fun startHardwareLoop() {
         if (!isRecordingActive) return
 
         if (!StorageManager.checkStorageSpace(this)) {
-            saveTripData() // Спасаем поездку, если кончилась память
+            saveTripData()
             isRecordingActive = false; recordingStartTime = 0L; playStopSound(); stopHardware(); stopLocationTracking(); updateNotification(); return
         }
 
@@ -490,14 +468,7 @@ class CameraService : LifecycleService() {
         startHardware(isRecording = true)
         startDynamicUpdates()
         updateNotification()
-        loopJob?.cancel()
-        loopJob = lifecycleScope.launch {
-            delay(RECORDING_DURATION_MS)
-            if (isRecordingActive) {
-                stopHardware()
-                startHardwareLoop()
-            }
-        }
+        // ИСПРАВЛЕНИЕ: Удалили глючный корутинный таймер, теперь полагаемся только на железобетонный MediaRecorder.setOnInfoListener
     }
 
     @SuppressLint("MissingPermission", "UnsafeOptInUsageError")
@@ -590,7 +561,12 @@ class CameraService : LifecycleService() {
                     val cam = provider.bindToLifecycle(this, CameraSelector.Builder().addCameraFilter { _ -> listOf(target) }.build(), *useCases.toTypedArray())
                     cameraControl = cam.cameraControl
                     cameraInfo = cam.cameraInfo
-                    if (isRecording) { mediaRecorder?.start(); playStartSound() }
+                    if (isRecording) {
+                        mediaRecorder?.start()
+                        actualRecordingStartTime = System.currentTimeMillis()
+                        currentSrtSecond = 0
+                        playStartSound()
+                    }
                 } catch (_: Exception) {}
             }, ContextCompat.getMainExecutor(this))
         } catch (_: Exception) {}
@@ -619,7 +595,8 @@ class CameraService : LifecycleService() {
             }
 
             mediaRecorder = MediaRecorder(this).apply {
-                setAudioSource(MediaRecorder.AudioSource.MIC)
+                // ИСПРАВЛЕНИЕ: CAMCORDER лучше глушит фоновый шум салона и дыхание, чем MIC
+                setAudioSource(MediaRecorder.AudioSource.CAMCORDER)
                 setVideoSource(MediaRecorder.VideoSource.SURFACE)
                 setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                 setVideoEncoder(if (prefCodec == "hevc" || prefCodec == "auto") MediaRecorder.VideoEncoder.HEVC else MediaRecorder.VideoEncoder.H264)
@@ -631,6 +608,17 @@ class CameraService : LifecycleService() {
                 setVideoFrameRate(prefFps)
                 setVideoSize(w, h)
                 setOrientationHint(rot)
+
+                // ИСПРАВЛЕНИЕ: Железобетонный цикл записи!
+                setMaxDuration(RECORDING_DURATION_MS.toInt())
+                setOnInfoListener { _, what, _ ->
+                    if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED) {
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            executeLoopNextFile()
+                        }
+                    }
+                }
+
                 setOutputFile(pfd!!.fileDescriptor)
                 prepare()
             }
@@ -641,10 +629,19 @@ class CameraService : LifecycleService() {
     }
 
     private fun stopHardware() {
-        loopJob?.cancel()
         dynamicUpdateJob?.cancel()
         cameraControl = null
         cameraInfo = null
+
+        if (actualRecordingStartTime > 0 && srtOutputStream != null) {
+            val stopTimeMillis = System.currentTimeMillis()
+            val totalSecs = ((stopTimeMillis - actualRecordingStartTime) / 1000).toInt()
+            while (currentSrtSecond <= totalSecs) {
+                writeSrtBlock(currentSrtSecond)
+                currentSrtSecond++
+            }
+        }
+
         try { mediaRecorder?.stop() } catch(_: Exception) {}
         finally {
             try { mediaRecorder?.release() } catch(_: Exception) {}
@@ -655,6 +652,7 @@ class CameraService : LifecycleService() {
             srtOutputStream = null
             try { cameraProvider?.unbindAll() } catch(_: Exception) {}
         }
+        actualRecordingStartTime = 0L
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -665,7 +663,6 @@ class CameraService : LifecycleService() {
     }
 
     override fun onDestroy() {
-        try { unregisterReceiver(powerReceiver) } catch (_: Exception) {}
         stopLocationTracking()
         orientationEventListener?.disable()
         thermalListener?.let { powerManager?.removeThermalStatusListener(it) }

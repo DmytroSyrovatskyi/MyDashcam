@@ -42,6 +42,16 @@
                 android:paddingStart="16dp"
                 android:paddingEnd="16dp" />
 
+            <!-- НОВАЯ КНОПКА: Облачная синхронизация -->
+            <ImageButton
+                android:id="@+id/btnCloudSync"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:src="@android:drawable/ic_popup_sync"
+                app:tint="#BA68C8"
+                android:contentDescription="@string/desc_cloud_sync" />
+
             <ImageButton
                 android:id="@+id/btnImport"
                 android:layout_width="48dp"

@@ -40,6 +40,11 @@ android {
         abortOnError = false
         checkReleaseBuilds = false
     }
+
+    packaging {
+        resources.excludes.add("META-INF/INDEX.LIST")
+        resources.excludes.add("META-INF/DEPENDENCIES")
+    }
 }
 
 dependencies {
@@ -75,6 +80,18 @@ dependencies {
     implementation(libs.material)
     implementation(libs.androidx.recyclerview)
 
-    // ИСПРАВЛЕНИЕ: Добавляем CardView напрямую, чтобы не зависеть от сломанного каталога libs
+    // ИСПРАВЛЕНИЕ: Добавляем CardView напрямую
     implementation("androidx.cardview:cardview:1.0.0")
+
+    // Библиотека для кнопки "Войти через Google" (Обновлено до свежей версии)
+    implementation("com.google.android.gms:play-services-auth:21.5.1")
+
+    // Библиотеки для работы с Google Drive API (Обновлено до свежей версии)
+    implementation("com.google.api-client:google-api-client-android:2.9.0")
+    implementation("com.google.apis:google-api-services-drive:v3-rev20220815-2.0.0") {
+        exclude(group = "org.apache.httpcomponents")
+    }
+
+    // Парсер JSON для работы Google Drive
+    implementation("com.google.api-client:google-api-client-gson:2.9.0")
 }

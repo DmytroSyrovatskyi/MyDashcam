@@ -43,6 +43,7 @@ import androidx.lifecycle.lifecycleScope
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import android.bluetooth.BluetoothManager
 
 data class VideoItem(
     val id: Long, val name: String, val size: Long, val duration: Long, val dateAdded: Long, val uri: Uri, val isLocked: Boolean
@@ -175,7 +176,6 @@ class MainActivity : AppCompatActivity() {
         btnTabSaved.setOnClickListener { switchTab(TabState.PROTECTED) }
         btnTabPreview.setOnClickListener { switchTab(TabState.PREVIEW) }
 
-        // ИСПРАВЛЕНО: Запускаем отдельную Activity
         btnTripJournal.setOnClickListener {
             startActivity(Intent(this, TripJournalActivity::class.java))
         }
@@ -276,7 +276,8 @@ class MainActivity : AppCompatActivity() {
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.POST_NOTIFICATIONS,
             Manifest.permission.READ_MEDIA_VIDEO,
-            Manifest.permission.ACCESS_FINE_LOCATION
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.BLUETOOTH_CONNECT // ИСПРАВЛЕНИЕ: Добавлен запрос прав для выбора устройств
         )
         if (!hasPermissions()) requestPermissions(permissions, 101)
     }
@@ -464,7 +465,57 @@ class MainActivity : AppCompatActivity() {
                 isChecked = prefs.getBoolean("pref_autostart", false)
                 setPadding(0, 16, 0, 0)
             }
-            layout.addView(swPip); layout.addView(swAuto)
+
+            // ИСПРАВЛЕНИЕ: Выбор конкретного Bluetooth устройства
+            val swAutoBt = SwitchCompat(this).apply {
+                text = if(cLang == "ru") "Авто-старт по Bluetooth" else "Auto-record on Bluetooth"
+                isChecked = prefs.getBoolean("pref_autostart_bt", false)
+                setPadding(0, 16, 0, 0)
+            }
+            val tvBtDevice = TextView(this).apply {
+                text = prefs.getString("pref_bt_name", if(cLang == "ru") "Устройство не выбрано" else "No device selected")
+                textSize = 12f
+                setTextColor(Color.GRAY)
+                visibility = if (swAutoBt.isChecked) View.VISIBLE else View.GONE
+                setPadding(0, 0, 0, 16)
+            }
+
+            swAutoBt.setOnCheckedChangeListener { _, isChecked ->
+                tvBtDevice.visibility = if (isChecked) View.VISIBLE else View.GONE
+                if (isChecked) {
+                    val btManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
+                    val adapter = btManager.adapter
+                    if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                        val devices = adapter?.bondedDevices?.toList() ?: emptyList()
+                        if (devices.isNotEmpty()) {
+                            val names = devices.map { it.name ?: it.address }.toTypedArray()
+                            AlertDialog.Builder(this@MainActivity)
+                                .setTitle(if(cLang == "ru") "Выберите магнитолу" else "Select Car Audio")
+                                .setItems(names) { _, which ->
+                                    val d = devices[which]
+                                    prefs.edit {
+                                        putString("pref_bt_mac", d.address)
+                                        putString("pref_bt_name", d.name ?: d.address)
+                                    }
+                                    tvBtDevice.text = d.name ?: d.address
+                                }
+                                .setOnCancelListener { swAutoBt.isChecked = false }
+                                .show()
+                        } else {
+                            Toast.makeText(this@MainActivity, "Нет сопряженных устройств", Toast.LENGTH_SHORT).show()
+                            swAutoBt.isChecked = false
+                        }
+                    } else {
+                        requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 103)
+                        swAutoBt.isChecked = false
+                    }
+                } else {
+                    prefs.edit { putString("pref_bt_mac", ""); putString("pref_bt_name", "") }
+                    tvBtDevice.text = if(cLang == "ru") "Устройство не выбрано" else "No device selected"
+                }
+            }
+
+            layout.addView(swPip); layout.addView(swAuto); layout.addView(swAutoBt); layout.addView(tvBtDevice)
 
             // ШТАМП НА ВИДЕО
             addHeader(if(cLang == "ru") "Штамп на видео (Субтитры)" else "Video Overlay (Subtitles)")
@@ -577,6 +628,7 @@ class MainActivity : AppCompatActivity() {
                         putString("app_lang", sL)
                         putBoolean("pref_pip", swPip.isChecked)
                         putBoolean("pref_autostart", swAuto.isChecked)
+                        putBoolean("pref_autostart_bt", swAutoBt.isChecked)
                         putBoolean("pref_stamp_date", swStampDate.isChecked)
                         putBoolean("pref_stamp_speed", swStampSpeed.isChecked)
                         putBoolean("pref_stamp_gps", swStampGps.isChecked)
