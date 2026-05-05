@@ -81,4 +81,6 @@
     <string name="cloud_btn_sign_out">Выйти</string>
     <string name="cloud_btn_backup">⬆️ Выгрузить в облако</string>
     <string name="cloud_btn_restore">⬇️ Загрузить из облака</string>
+
+    <string name="toast_gps_warning">⚠️ Включите Локацию (GPS) для скорости!</string>
 </resources>

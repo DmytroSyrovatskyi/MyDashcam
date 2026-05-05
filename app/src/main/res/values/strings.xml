@@ -84,5 +84,7 @@
     <string name="cloud_btn_backup">⬆️ Backup to Cloud</string>
     <string name="cloud_btn_restore">⬇️ Restore from Cloud</string>
 
+    <string name="toast_gps_warning">⚠️ Enable Location (GPS) for speed overlay!</string>
+
 
 </resources>

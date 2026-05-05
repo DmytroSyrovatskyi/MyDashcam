@@ -213,9 +213,11 @@ class CameraService : LifecycleService() {
         if (prefStampSpeed || prefStampGps) {
             val isGpsEnabled = locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true
             if (!isGpsEnabled) {
-                // ИСПРАВЛЕНИЕ: Предупреждение о выключенном GPS
+                // ИСПРАВЛЕНИЕ: Берем текст из strings.xml
+                val msg = getString(R.string.toast_gps_warning)
+
                 Handler(Looper.getMainLooper()).post {
-                    Toast.makeText(this, "⚠️ Включите Локацию (GPS) для скорости!", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@CameraService, msg, Toast.LENGTH_LONG).show()
                 }
             } else if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
                 try { locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener) } catch (_: Exception) {}
@@ -468,7 +470,6 @@ class CameraService : LifecycleService() {
         startHardware(isRecording = true)
         startDynamicUpdates()
         updateNotification()
-        // ИСПРАВЛЕНИЕ: Удалили глючный корутинный таймер, теперь полагаемся только на железобетонный MediaRecorder.setOnInfoListener
     }
 
     @SuppressLint("MissingPermission", "UnsafeOptInUsageError")
@@ -595,7 +596,6 @@ class CameraService : LifecycleService() {
             }
 
             mediaRecorder = MediaRecorder(this).apply {
-                // ИСПРАВЛЕНИЕ: CAMCORDER лучше глушит фоновый шум салона и дыхание, чем MIC
                 setAudioSource(MediaRecorder.AudioSource.CAMCORDER)
                 setVideoSource(MediaRecorder.VideoSource.SURFACE)
                 setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
@@ -609,7 +609,6 @@ class CameraService : LifecycleService() {
                 setVideoSize(w, h)
                 setOrientationHint(rot)
 
-                // ИСПРАВЛЕНИЕ: Железобетонный цикл записи!
                 setMaxDuration(RECORDING_DURATION_MS.toInt())
                 setOnInfoListener { _, what, _ ->
                     if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED) {
