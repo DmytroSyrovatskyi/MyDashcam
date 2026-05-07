@@ -52,6 +52,7 @@ class CameraService : LifecycleService() {
     private var pfd: ParcelFileDescriptor? = null
     private var srtOutputStream: OutputStream? = null
     private var dynamicUpdateJob: Job? = null
+    private var loopJob: Job? = null // ИСПРАВЛЕНИЕ: Возвращаем переменную для мягкого таймера цикла
     private var cameraProvider: ProcessCameraProvider? = null
     private var cameraControl: CameraControl? = null
     private var cameraInfo: CameraInfo? = null
@@ -213,13 +214,14 @@ class CameraService : LifecycleService() {
         if (prefStampSpeed || prefStampGps) {
             val isGpsEnabled = locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true
             if (!isGpsEnabled) {
-                // ИСПРАВЛЕНИЕ: Берем текст из strings.xml
                 val msg = getString(R.string.toast_gps_warning)
-
                 Handler(Looper.getMainLooper()).post {
                     Toast.makeText(this@CameraService, msg, Toast.LENGTH_LONG).show()
                 }
-            } else if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            }
+            // ИСПРАВЛЕНИЕ 1: Теперь мы ВСЕГДА регистрируем слушатель, даже если GPS сейчас выключен.
+            // Как только пользователь включит GPS, локация сразу начнет поступать, и одометр заработает.
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
                 try { locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener) } catch (_: Exception) {}
             }
         }
@@ -470,6 +472,16 @@ class CameraService : LifecycleService() {
         startHardware(isRecording = true)
         startDynamicUpdates()
         updateNotification()
+
+        // ИСПРАВЛЕНИЕ 2: Возвращаем мягкий корутинный таймер вместо жесткого MediaRecorder лимита.
+        // Это предотвратит появление "битых" файлов при переключении циклов на специфичных прошивках.
+        loopJob?.cancel()
+        loopJob = lifecycleScope.launch {
+            delay(RECORDING_DURATION_MS)
+            if (isRecordingActive) {
+                executeLoopNextFile()
+            }
+        }
     }
 
     @SuppressLint("MissingPermission", "UnsafeOptInUsageError")
@@ -609,14 +621,7 @@ class CameraService : LifecycleService() {
                 setVideoSize(w, h)
                 setOrientationHint(rot)
 
-                setMaxDuration(RECORDING_DURATION_MS.toInt())
-                setOnInfoListener { _, what, _ ->
-                    if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED) {
-                        lifecycleScope.launch(Dispatchers.Main) {
-                            executeLoopNextFile()
-                        }
-                    }
-                }
+                // Убрано жесткое системное ограничение setMaxDuration, чтобы избежать битых файлов.
 
                 setOutputFile(pfd!!.fileDescriptor)
                 prepare()
@@ -628,6 +633,7 @@ class CameraService : LifecycleService() {
     }
 
     private fun stopHardware() {
+        loopJob?.cancel() // Отменяем таймер при остановке
         dynamicUpdateJob?.cancel()
         cameraControl = null
         cameraInfo = null
