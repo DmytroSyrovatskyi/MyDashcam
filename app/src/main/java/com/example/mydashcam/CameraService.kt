@@ -43,7 +43,6 @@ import kotlinx.coroutines.*
 import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlin.math.roundToInt
 
 @OptIn(ExperimentalCamera2Interop::class)
 class CameraService : LifecycleService() {
@@ -131,7 +130,7 @@ class CameraService : LifecycleService() {
         const val RECORDING_DURATION_MS = 600000L
     }
 
-    // ИСПРАВЛЕНИЕ: Защита от фантомного пробега
+    // Защита от фантомного пробега
     private val locationListener = LocationListener { location ->
         var rawSpeedKmH = 0f
         var currentDist = 0f
@@ -399,24 +398,15 @@ class CameraService : LifecycleService() {
         }
     }
 
+    // ИСПРАВЛЕНИЕ: Отключено искусственное затемнение (EV), автоэкспозиция работает штатно
     private fun startDynamicUpdates() {
         dynamicUpdateJob?.cancel()
         dynamicUpdateJob = lifecycleScope.launch {
-            var currEv = 0.0f
-
             while (isRecordingActive) {
                 delay(500)
                 if (actualRecordingStartTime == 0L) continue
 
                 val darkness = ((isoEma - minHardwareIso) / (maxHardwareIso - minHardwareIso)).coerceIn(0f, 1f)
-                val targetEV = 0.0f - (1.5f * darkness)
-                currEv = (targetEV * 0.05f) + (currEv * 0.95f)
-
-                val step = cameraInfo?.exposureState?.exposureCompensationStep
-                if (step != null && step.numerator != 0) {
-                    val idx = (currEv / (step.numerator.toFloat()/step.denominator.toFloat())).roundToInt()
-                    cameraControl?.setExposureCompensationIndex(idx)
-                }
 
                 val codecMult = if (prefCodec == "hevc" || prefCodec == "auto") 0.7f else 1.0f
                 val resMult = if(prefResolution == "4k") 3.0f else if(prefResolution == "720") 0.6f else 1.0f
@@ -525,7 +515,7 @@ class CameraService : LifecycleService() {
                     val extender = Camera2Interop.Extender(builder)
 
                     extender.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, bestRange)
-                    extender.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
+                    // ИСПРАВЛЕНИЕ: Убрали жесткий CONTROL_AF_MODE, чтобы CameraX сам выбрал лучший режим автофокуса
                     extender.setCaptureRequestOption(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON)
                     extender.setCaptureRequestOption(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_ON)
 
