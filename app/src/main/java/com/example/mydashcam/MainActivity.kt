@@ -40,6 +40,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.lifecycle.lifecycleScope
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -277,7 +278,7 @@ class MainActivity : AppCompatActivity() {
             Manifest.permission.POST_NOTIFICATIONS,
             Manifest.permission.READ_MEDIA_VIDEO,
             Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.BLUETOOTH_CONNECT // ИСПРАВЛЕНИЕ: Добавлен запрос прав для выбора устройств
+            Manifest.permission.BLUETOOTH_CONNECT
         )
         if (!hasPermissions()) requestPermissions(permissions, 101)
     }
@@ -450,14 +451,26 @@ class MainActivity : AppCompatActivity() {
             val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(64, 48, 64, 48) }
             fun addHeader(t: String) { layout.addView(TextView(this).apply { text = t.uppercase(); textSize = 11f; setTypeface(null, Typeface.BOLD); setTextColor("#66BB6A".toColorInt()); setPadding(0, 48, 0, 16) }) }
 
-            // ЯЗЫК
             addHeader(if(cLang == "ru") "Язык" else "Language")
             val rgL = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
             val rbRu = RadioButton(this).apply { text = "RU"; setPadding(0,0,40,0) }; val rbEn = RadioButton(this).apply { text = "EN" }
             rgL.addView(rbRu); rgL.addView(rbEn); if(cLang == "ru") rbRu.isChecked = true else rbEn.isChecked = true
             layout.addView(rgL)
 
-            // АВТОМАТИЗАЦИЯ
+            // ИСПРАВЛЕНИЕ: Функция запроса прав для надежного автозапуска из фона
+            fun requestBackgroundPermissions() {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    val pm = getSystemService(POWER_SERVICE) as PowerManager
+                    if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                        try { startActivity(Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply { data = Uri.parse("package:$packageName") }) } catch (_: Exception) {}
+                    }
+                    if (!android.provider.Settings.canDrawOverlays(this@MainActivity)) {
+                        Toast.makeText(this@MainActivity, if(cLang == "ru") "Дайте разрешение 'Поверх окон' для надежного автозапуска!" else "Allow 'Display over apps' for reliable auto-start!", Toast.LENGTH_LONG).show()
+                        try { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply { data = Uri.parse("package:$packageName") }) } catch (_: Exception) {}
+                    }
+                }
+            }
+
             addHeader(if(cLang == "ru") "Автоматизация" else "Automation")
             val swPip = SwitchCompat(this).apply { text = getString(R.string.settings_pip_desc); isChecked = prefs.getBoolean("pref_pip", false) }
             val swAuto = SwitchCompat(this).apply {
@@ -465,8 +478,9 @@ class MainActivity : AppCompatActivity() {
                 isChecked = prefs.getBoolean("pref_autostart", false)
                 setPadding(0, 16, 0, 0)
             }
+            // Запрашиваем права при включении тумблера
+            swAuto.setOnCheckedChangeListener { _, isChecked -> if (isChecked) requestBackgroundPermissions() }
 
-            // ИСПРАВЛЕНИЕ: Выбор конкретного Bluetooth устройства
             val swAutoBt = SwitchCompat(this).apply {
                 text = if(cLang == "ru") "Авто-старт по Bluetooth" else "Auto-record on Bluetooth"
                 isChecked = prefs.getBoolean("pref_autostart_bt", false)
@@ -483,6 +497,7 @@ class MainActivity : AppCompatActivity() {
             swAutoBt.setOnCheckedChangeListener { _, isChecked ->
                 tvBtDevice.visibility = if (isChecked) View.VISIBLE else View.GONE
                 if (isChecked) {
+                    requestBackgroundPermissions()
                     val btManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
                     val adapter = btManager.adapter
                     if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
@@ -517,7 +532,6 @@ class MainActivity : AppCompatActivity() {
 
             layout.addView(swPip); layout.addView(swAuto); layout.addView(swAutoBt); layout.addView(tvBtDevice)
 
-            // ШТАМП НА ВИДЕО
             addHeader(if(cLang == "ru") "Штамп на видео (Субтитры)" else "Video Overlay (Subtitles)")
             val swStampDate = SwitchCompat(this).apply { text = if(cLang == "ru") "Дата и Время" else "Date & Time"; isChecked = prefs.getBoolean("pref_stamp_date", true) }
             val swStampSpeed = SwitchCompat(this).apply { text = if(cLang == "ru") "Скорость (км/ч)" else "Speed (km/h)"; isChecked = prefs.getBoolean("pref_stamp_speed", false); setPadding(0, 16, 0, 0) }
@@ -527,7 +541,6 @@ class MainActivity : AppCompatActivity() {
 
             layout.addView(swStampDate); layout.addView(swStampSpeed); layout.addView(swStampGps); layout.addView(swStampGForce)
 
-            // ОБЪЕКТИВ
             addHeader(if(cLang == "ru") "Объектив" else "Camera Lens")
             val rgC = RadioGroup(this).apply { orientation = LinearLayout.VERTICAL }
             val rbA = RadioButton(this).apply { text = if(cLang == "ru") "Ультра-широкий (Авто)" else "Ultra-Wide (Auto)"; id = View.generateViewId() }
@@ -539,7 +552,6 @@ class MainActivity : AppCompatActivity() {
             when(cCam) { "front" -> rbF.isChecked = true; "back" -> rbB.isChecked = true; else -> rbA.isChecked = true }
             layout.addView(rgC)
 
-            // РАЗРЕШЕНИЕ И FPS
             addHeader(if(cLang == "ru") "Качество" else "Resolution")
             val rb4 = RadioButton(this).apply { text = "4K UHD" }
             val rb1 = RadioButton(this).apply { text = "1080p Full HD" }
@@ -574,7 +586,6 @@ class MainActivity : AppCompatActivity() {
             checkHardware(cCam)
             rgC.setOnCheckedChangeListener { _, id -> cCam = when(id) { rbF.id -> "front"; rbB.id -> "back"; else -> "auto" }; checkHardware(cCam) }
 
-            // КОДЕК
             addHeader(if(cLang == "ru") "Формат видео (Кодек)" else "Video Codec")
             val rgCodec = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
             val rbCodecAuto = RadioButton(this).apply { text = if(cLang == "ru") "АВТО (HEVC -> H.264)" else "AUTO (HEVC -> H.264)" }
@@ -584,7 +595,6 @@ class MainActivity : AppCompatActivity() {
             when(cCodec) { "hevc" -> rbCodecHevc.isChecked = true; "avc" -> rbCodecAvc.isChecked = true; else -> rbCodecAuto.isChecked = true }
             layout.addView(rgCodec)
 
-            // ПАМЯТЬ
             addHeader(if(cLang == "ru") "Лимит памяти" else "Storage Limit")
             val loopL = TextView(this).apply { textSize = 15f; setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_active)) }
             val cycleI = TextView(this).apply { text = "⏱ 1 cycle = 10 minutes"; textSize = 12f; setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_inactive)); setPadding(0,4,0,16) }
@@ -681,8 +691,10 @@ class MainActivity : AppCompatActivity() {
             val tI: TextView = v.findViewById(R.id.textVideoInfo); val bL: ImageButton = v.findViewById(R.id.btnLockUnlock); val bD: ImageButton = v.findViewById(R.id.btnDelete)
         }
         override fun onCreateViewHolder(p: ViewGroup, t: Int) = VideoViewHolder(LayoutInflater.from(p.context).inflate(R.layout.item_video, p, false))
+
         override fun onBindViewHolder(h: VideoViewHolder, p: Int) {
-            val v = videoList[p]; val context = h.itemView.context
+            val v = videoList[p]
+            val context = h.itemView.context
             val sDate = SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault()).format(Date(v.dateAdded * 1000L))
             val eDate = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date((v.dateAdded * 1000L) + v.duration))
             h.tD.text = context.getString(R.string.video_time_range, sDate, eDate)
@@ -690,20 +702,56 @@ class MainActivity : AppCompatActivity() {
             h.tI.text = context.getString(R.string.video_info_format, (v.duration / 60000).toInt(), sz)
 
             h.bL.setImageResource(if (v.isLocked) android.R.drawable.ic_menu_revert else android.R.drawable.ic_menu_save)
+
             h.bL.setOnClickListener {
                 val newName = if (v.isLocked) v.name.replace("LOCKED_BVR_PRO_", "BVR_PRO_") else v.name.replace("BVR_PRO_", "LOCKED_BVR_PRO_")
+
                 contentResolver.update(v.uri, ContentValues().apply { put(MediaStore.Video.Media.DISPLAY_NAME, newName) }, null, null)
-                StorageManager.renameCompanionSrt(context, v.name, newName)
+
+                val folder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "MyDashcam")
+                val oldSrtName = v.name.replace(".mp4", ".srt")
+                val newSrtName = newName.replace(".mp4", ".srt")
+                val oldSrtFile = File(folder, oldSrtName)
+                val newSrtFile = File(folder, newSrtName)
+
+                if (oldSrtFile.exists()) {
+                    oldSrtFile.renameTo(newSrtFile)
+                } else {
+                    StorageManager.renameCompanionSrt(context, v.name, newName)
+                }
+
                 loadVideos()
             }
 
+            h.bD.alpha = if (v.isLocked) 0.3f else 1.0f
+
             h.bD.setOnClickListener {
-                AlertDialog.Builder(context, android.R.style.Theme_DeviceDefault_Dialog_Alert).setTitle(getString(R.string.dialog_delete_title)).setMessage(getString(R.string.dialog_delete_msg)).setPositiveButton(getString(R.string.btn_delete)) { _, _ ->
-                    contentResolver.delete(v.uri, null, null)
-                    StorageManager.deleteCompanionSrt(context, v.name)
-                    loadVideos()
-                }.setNegativeButton(getString(R.string.btn_cancel), null).show()
+                if (v.isLocked) {
+                    val msg = if (Locale.getDefault().language == "ru") "Сначала снимите защиту с файла!" else "Unlock the file first to delete!"
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+
+                AlertDialog.Builder(context, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle(getString(R.string.dialog_delete_title))
+                    .setMessage(getString(R.string.dialog_delete_msg))
+                    .setPositiveButton(getString(R.string.btn_delete)) { _, _ ->
+                        contentResolver.delete(v.uri, null, null)
+
+                        val folder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "MyDashcam")
+                        val srtFileName = v.name.replace(".mp4", ".srt")
+                        val srtFile = File(folder, srtFileName)
+
+                        if (srtFile.exists()) {
+                            srtFile.delete()
+                        } else {
+                            StorageManager.deleteCompanionSrt(context, v.name)
+                        }
+
+                        loadVideos()
+                    }.setNegativeButton(getString(R.string.btn_cancel), null).show()
             }
+
             try { h.img?.setImageBitmap(contentResolver.loadThumbnail(v.uri, Size(256, 256), null)) } catch (_: Exception) { h.img?.setImageDrawable(null) }
             h.itemView.setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW).apply { setDataAndType(v.uri, "video/mp4"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }
         }

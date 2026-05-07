@@ -52,7 +52,7 @@ class CameraService : LifecycleService() {
     private var pfd: ParcelFileDescriptor? = null
     private var srtOutputStream: OutputStream? = null
     private var dynamicUpdateJob: Job? = null
-    private var loopJob: Job? = null // ИСПРАВЛЕНИЕ: Возвращаем переменную для мягкого таймера цикла
+    private var loopJob: Job? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var cameraControl: CameraControl? = null
     private var cameraInfo: CameraInfo? = null
@@ -131,19 +131,19 @@ class CameraService : LifecycleService() {
         const val RECORDING_DURATION_MS = 600000L
     }
 
+    // ИСПРАВЛЕНИЕ: Защита от фантомного пробега
     private val locationListener = LocationListener { location ->
         var rawSpeedKmH = 0f
+        var currentDist = 0f
 
         lastLocation?.let {
-            val dist = location.distanceTo(it)
-            tripDistanceMeters += dist
-
+            currentDist = location.distanceTo(it)
             rawSpeedKmH = if (location.hasSpeed()) {
                 location.speed * 3.6f
             } else {
                 val timeDeltaSec = (location.time - it.time) / 1000f
                 if (timeDeltaSec >= 1.0f) {
-                    (dist / timeDeltaSec) * 3.6f
+                    (currentDist / timeDeltaSec) * 3.6f
                 } else {
                     smoothedSpeedKmH
                 }
@@ -160,6 +160,9 @@ class CameraService : LifecycleService() {
 
         if (smoothedSpeedKmH < 3f) {
             smoothedSpeedKmH = 0f
+        } else {
+            // Метры прибавляются ТОЛЬКО если скорость выше 3 км/ч
+            tripDistanceMeters += currentDist
         }
 
         currentSpeedKmH = smoothedSpeedKmH
@@ -219,8 +222,6 @@ class CameraService : LifecycleService() {
                     Toast.makeText(this@CameraService, msg, Toast.LENGTH_LONG).show()
                 }
             }
-            // ИСПРАВЛЕНИЕ 1: Теперь мы ВСЕГДА регистрируем слушатель, даже если GPS сейчас выключен.
-            // Как только пользователь включит GPS, локация сразу начнет поступать, и одометр заработает.
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
                 try { locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener) } catch (_: Exception) {}
             }
@@ -473,8 +474,6 @@ class CameraService : LifecycleService() {
         startDynamicUpdates()
         updateNotification()
 
-        // ИСПРАВЛЕНИЕ 2: Возвращаем мягкий корутинный таймер вместо жесткого MediaRecorder лимита.
-        // Это предотвратит появление "битых" файлов при переключении циклов на специфичных прошивках.
         loopJob?.cancel()
         loopJob = lifecycleScope.launch {
             delay(RECORDING_DURATION_MS)
@@ -621,8 +620,6 @@ class CameraService : LifecycleService() {
                 setVideoSize(w, h)
                 setOrientationHint(rot)
 
-                // Убрано жесткое системное ограничение setMaxDuration, чтобы избежать битых файлов.
-
                 setOutputFile(pfd!!.fileDescriptor)
                 prepare()
             }
@@ -633,7 +630,7 @@ class CameraService : LifecycleService() {
     }
 
     private fun stopHardware() {
-        loopJob?.cancel() // Отменяем таймер при остановке
+        loopJob?.cancel()
         dynamicUpdateJob?.cancel()
         cameraControl = null
         cameraInfo = null
