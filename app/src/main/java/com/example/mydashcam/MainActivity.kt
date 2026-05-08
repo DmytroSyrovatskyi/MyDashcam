@@ -82,7 +82,7 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) {
             contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             getSharedPreferences("DashcamPrefs", MODE_PRIVATE).edit { putString("pref_custom_storage_uri", uri.toString()) }
-            Toast.makeText(this, "Папка сохранения изменена!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.msg_storage_changed), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -220,8 +220,7 @@ class MainActivity : AppCompatActivity() {
 
         btnSettings.setOnClickListener {
             if (CameraService.isRecordingActive) {
-                val msg = if (Locale.getDefault().language == "ru") "Остановите запись для настройки" else "Stop recording to change settings"
-                Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(R.string.msg_settings_stop_record), Toast.LENGTH_SHORT).show()
             } else {
                 openSmartSettingsDialog()
             }
@@ -469,26 +468,34 @@ class MainActivity : AppCompatActivity() {
             rgL.addView(rbRu); rgL.addView(rbEn); if(cLang == "ru") rbRu.isChecked = true else rbEn.isChecked = true
             layout.addView(rgL)
 
-            addHeader(if(cLang == "ru") "Место сохранения (SSD / SD)" else "Storage Location")
+            // ЛОКАЛИЗАЦИЯ: Внешний накопитель
+            addHeader(getString(R.string.storage_location))
             val tvStorageInfo = TextView(this).apply {
-                text = if (prefs.getString("pref_custom_storage_uri", "").isNullOrEmpty()) {
-                    if(cLang == "ru") "Внутренняя память (По умолчанию)" else "Internal Storage (Default)"
+                val configuredUri = prefs.getString("pref_custom_storage_uri", "")
+                val effectiveUri = StorageManager.getEffectiveStorageUri(this@MainActivity)
+
+                text = if (configuredUri.isNullOrEmpty()) {
+                    getString(R.string.storage_internal_default)
+                } else if (effectiveUri == null) {
+                    getString(R.string.storage_warning_disconnected)
                 } else {
-                    if(cLang == "ru") "Выбрана внешняя папка 📁" else "External Storage Selected 📁"
+                    getString(R.string.storage_external_selected)
                 }
-                setTextColor(Color.LTGRAY)
+                setTextColor(if (!configuredUri.isNullOrEmpty() && effectiveUri == null) Color.RED else Color.LTGRAY)
                 setPadding(0, 0, 0, 16)
             }
+
             val btnStorageSelect = Button(this).apply {
-                text = if(cLang == "ru") "Выбрать папку" else "Select Folder"
+                text = getString(R.string.btn_select_folder)
                 setOnClickListener { folderPickerLauncher.launch(null) }
             }
             val btnStorageReset = Button(this).apply {
-                text = if(cLang == "ru") "Сбросить по умолчанию" else "Reset to Default"
+                text = getString(R.string.btn_reset_default)
                 setOnClickListener {
                     prefs.edit { remove("pref_custom_storage_uri") }
-                    tvStorageInfo.text = if(cLang == "ru") "Внутренняя память (По умолчанию)" else "Internal Storage (Default)"
-                    Toast.makeText(this@MainActivity, "Reset to Internal Storage", Toast.LENGTH_SHORT).show()
+                    tvStorageInfo.text = getString(R.string.storage_internal_default)
+                    tvStorageInfo.setTextColor(Color.LTGRAY)
+                    Toast.makeText(this@MainActivity, getString(R.string.msg_storage_reset), Toast.LENGTH_SHORT).show()
                 }
             }
             val storageLayout = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -505,7 +512,7 @@ class MainActivity : AppCompatActivity() {
                     try { startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply { data = "package:$packageName".toUri() }) } catch (_: Exception) {}
                 }
                 if (!Settings.canDrawOverlays(this@MainActivity)) {
-                    Toast.makeText(this@MainActivity, if(cLang == "ru") "Дайте разрешение 'Поверх окон' для надежного автозапуска!" else "Allow 'Display over apps' for reliable auto-start!", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@MainActivity, getString(R.string.msg_overlay_permission_needed), Toast.LENGTH_LONG).show()
                     try { startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply { data = "package:$packageName".toUri() }) } catch (_: Exception) {}
                 }
             }
@@ -702,9 +709,9 @@ class MainActivity : AppCompatActivity() {
     private fun loadVideos() {
         lifecycleScope.launch(Dispatchers.IO) {
             val newList = mutableListOf<VideoItem>()
-            val customUriStr = getSharedPreferences("DashcamPrefs", MODE_PRIVATE).getString("pref_custom_storage_uri", "")
+            val effectiveUriStr = StorageManager.getEffectiveStorageUri(this@MainActivity)
 
-            if (customUriStr.isNullOrEmpty()) {
+            if (effectiveUriStr == null) {
                 try {
                     contentResolver.query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.DISPLAY_NAME, MediaStore.Video.Media.SIZE, MediaStore.Video.Media.DURATION, MediaStore.Video.Media.DATE_ADDED), "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?", arrayOf("%Movies/MyDashcam%"), "${MediaStore.Video.Media.DATE_ADDED} DESC")?.use { cursor ->
                         while (cursor.moveToNext()) {
@@ -718,7 +725,7 @@ class MainActivity : AppCompatActivity() {
                 } catch (_: Exception) {}
             } else {
                 try {
-                    val treeUri = customUriStr.toUri()
+                    val treeUri = effectiveUriStr.toUri()
                     val docFile = DocumentFile.fromTreeUri(this@MainActivity, treeUri)
                     docFile?.listFiles()?.forEach { file ->
                         val name = file.name ?: ""
@@ -770,9 +777,9 @@ class MainActivity : AppCompatActivity() {
 
             h.bL.setOnClickListener {
                 val newName = if (v.isLocked) v.name.replace("LOCKED_BVR_PRO_", "BVR_PRO_") else v.name.replace("BVR_PRO_", "LOCKED_BVR_PRO_")
-                val customUriStr = context.getSharedPreferences("DashcamPrefs", MODE_PRIVATE).getString("pref_custom_storage_uri", "")
+                val effectiveUriStr = StorageManager.getEffectiveStorageUri(context)
 
-                if (customUriStr.isNullOrEmpty()) {
+                if (effectiveUriStr == null) {
                     contentResolver.update(v.uri, ContentValues().apply { put(MediaStore.Video.Media.DISPLAY_NAME, newName) }, null, null)
                     val folder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "MyDashcam")
                     val oldSrtFile = File(folder, v.name.replace(".mp4", ".srt"))
@@ -780,7 +787,7 @@ class MainActivity : AppCompatActivity() {
                     else StorageManager.renameCompanionSrt(context, v.name, newName)
                 } else {
                     try {
-                        val treeUri = customUriStr.toUri()
+                        val treeUri = effectiveUriStr.toUri()
                         val docDir = DocumentFile.fromTreeUri(context, treeUri)
                         docDir?.findFile(v.name)?.renameTo(newName)
                         docDir?.findFile(v.name.replace(".mp4", ".srt"))?.renameTo(newName.replace(".mp4", ".srt"))
@@ -793,8 +800,7 @@ class MainActivity : AppCompatActivity() {
 
             h.bD.setOnClickListener {
                 if (v.isLocked) {
-                    val msg = if (Locale.getDefault().language == "ru") "Сначала снимите защиту с файла!" else "Unlock the file first to delete!"
-                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, getString(R.string.msg_unlock_first), Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
 
@@ -802,15 +808,15 @@ class MainActivity : AppCompatActivity() {
                     .setTitle(getString(R.string.dialog_delete_title))
                     .setMessage(getString(R.string.dialog_delete_msg))
                     .setPositiveButton(getString(R.string.btn_delete)) { _, _ ->
-                        val customUriStr = context.getSharedPreferences("DashcamPrefs", MODE_PRIVATE).getString("pref_custom_storage_uri", "")
+                        val effectiveUriStr = StorageManager.getEffectiveStorageUri(context)
 
-                        if (customUriStr.isNullOrEmpty()) {
+                        if (effectiveUriStr == null) {
                             contentResolver.delete(v.uri, null, null)
                             val srtFile = File(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "MyDashcam"), v.name.replace(".mp4", ".srt"))
                             if (srtFile.exists()) srtFile.delete() else StorageManager.deleteCompanionSrt(context, v.name)
                         } else {
                             try {
-                                val treeUri = customUriStr.toUri()
+                                val treeUri = effectiveUriStr.toUri()
                                 val docDir = DocumentFile.fromTreeUri(context, treeUri)
                                 docDir?.findFile(v.name)?.delete()
                                 docDir?.findFile(v.name.replace(".mp4", ".srt"))?.delete()

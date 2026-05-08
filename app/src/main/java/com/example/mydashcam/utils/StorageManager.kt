@@ -15,14 +15,32 @@ import com.example.mydashcam.R
 
 object StorageManager {
 
+    // Умная проверка: доступен ли настроенный внешний диск прямо сейчас
+    fun getEffectiveStorageUri(context: Context): String? {
+        val customUriStr = context.getSharedPreferences("DashcamPrefs", Context.MODE_PRIVATE).getString("pref_custom_storage_uri", "")
+        if (customUriStr.isNullOrEmpty()) return null
+
+        try {
+            val treeUri = customUriStr.toUri()
+            val docDir = DocumentFile.fromTreeUri(context, treeUri)
+            // Если диск физически подключен, он существует и доступен для записи
+            if (docDir != null && docDir.exists() && docDir.canWrite()) {
+                return customUriStr
+            }
+        } catch (_: Exception) {}
+
+        // Если флешку вытащили или нет прав — откатываемся на внутреннюю память
+        return null
+    }
+
     fun checkStorageSpace(context: Context): Boolean {
         try {
-            val customUriStr = context.getSharedPreferences("DashcamPrefs", Context.MODE_PRIVATE).getString("pref_custom_storage_uri", "")
+            val effectiveUriStr = getEffectiveStorageUri(context)
 
-            val stat = if (customUriStr.isNullOrEmpty()) {
+            val stat = if (effectiveUriStr == null) {
                 StatFs(Environment.getExternalStorageDirectory().path)
             } else {
-                val treeUri = customUriStr.toUri()
+                val treeUri = effectiveUriStr.toUri()
                 val docFile = DocumentFile.fromTreeUri(context, treeUri)
 
                 val pfd = context.contentResolver.openFileDescriptor(docFile!!.uri, "r")
@@ -51,9 +69,9 @@ object StorageManager {
     fun manageLoopStorage(context: Context, limit: Int) {
         if (limit > 50) return
         try {
-            val customUriStr = context.getSharedPreferences("DashcamPrefs", Context.MODE_PRIVATE).getString("pref_custom_storage_uri", "")
+            val effectiveUriStr = getEffectiveStorageUri(context)
 
-            if (customUriStr.isNullOrEmpty()) {
+            if (effectiveUriStr == null) {
                 context.contentResolver.query(
                     MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
                     arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.DISPLAY_NAME),
@@ -73,7 +91,7 @@ object StorageManager {
                     }
                 }
             } else {
-                val treeUri = customUriStr.toUri()
+                val treeUri = effectiveUriStr.toUri()
                 val docDir = DocumentFile.fromTreeUri(context, treeUri)
 
                 val files = docDir?.listFiles()?.filter { it.name?.startsWith("BVR_PRO_") == true }?.sortedBy { it.lastModified() } ?: emptyList()
@@ -93,8 +111,8 @@ object StorageManager {
     fun getFilesCount(context: Context): Int {
         var count = 0
         try {
-            val customUriStr = context.getSharedPreferences("DashcamPrefs", Context.MODE_PRIVATE).getString("pref_custom_storage_uri", "")
-            if (customUriStr.isNullOrEmpty()) {
+            val effectiveUriStr = getEffectiveStorageUri(context)
+            if (effectiveUriStr == null) {
                 context.contentResolver.query(
                     MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
                     arrayOf(MediaStore.Video.Media._ID),
@@ -103,7 +121,7 @@ object StorageManager {
                     null
                 )?.use { c -> count = c.count }
             } else {
-                val treeUri = customUriStr.toUri()
+                val treeUri = effectiveUriStr.toUri()
                 val docDir = DocumentFile.fromTreeUri(context, treeUri)
                 count = docDir?.listFiles()?.count { it.name?.startsWith("BVR_PRO_") == true } ?: 0
             }

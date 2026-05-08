@@ -103,6 +103,8 @@ class CameraService : LifecycleService() {
     private var tripMaxSpeedKmh = 0f
     private var tripMaxGForce = 0f
 
+    private var isStorageWarningShown = false
+
     private var previewCallback: ((Bitmap, Int) -> Unit)? = null
     private var reusableBitmap: Bitmap? = null
     private val binder = LocalBinder()
@@ -436,14 +438,14 @@ class CameraService : LifecycleService() {
         if (isRecordingActive && uri != null && name != null) {
             stopHardware()
             val newName = name.replace("BVR_PRO_", "LOCKED_BVR_PRO_")
-            val customUriStr = getSharedPreferences("DashcamPrefs", MODE_PRIVATE).getString("pref_custom_storage_uri", "")
+            val effectiveUriStr = StorageManager.getEffectiveStorageUri(this)
 
-            if (customUriStr.isNullOrEmpty()) {
+            if (effectiveUriStr == null) {
                 contentResolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.DISPLAY_NAME, newName) }, null, null)
                 StorageManager.renameCompanionSrt(this, name, newName)
             } else {
                 try {
-                    val treeUri = customUriStr.toUri()
+                    val treeUri = effectiveUriStr.toUri()
                     val docDir = DocumentFile.fromTreeUri(this, treeUri)
                     docDir?.findFile(name)?.renameTo(newName)
                     docDir?.findFile(name.replace(".mp4", ".srt"))?.renameTo(newName.replace(".mp4", ".srt"))
@@ -459,8 +461,27 @@ class CameraService : LifecycleService() {
         startHardwareLoop()
     }
 
+    private fun checkStorageAvailability() {
+        val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
+        val configuredUri = prefs.getString("pref_custom_storage_uri", "")
+        val effectiveUri = StorageManager.getEffectiveStorageUri(this)
+
+        if (!configuredUri.isNullOrEmpty() && effectiveUri == null) {
+            if (!isStorageWarningShown) {
+                Handler(Looper.getMainLooper()).post {
+                    Toast.makeText(this, getString(R.string.storage_warning_disconnected), Toast.LENGTH_LONG).show()
+                }
+                isStorageWarningShown = true
+            }
+        } else {
+            isStorageWarningShown = false
+        }
+    }
+
     private fun startHardwareLoop() {
         if (!isRecordingActive) return
+
+        checkStorageAvailability()
 
         if (!StorageManager.checkStorageSpace(this)) {
             saveTripData()
@@ -589,9 +610,9 @@ class CameraService : LifecycleService() {
             currentVideoName = "BVR_PRO_$timestamp.mp4"
             val srtName = "BVR_PRO_$timestamp.srt"
 
-            val customUriStr = getSharedPreferences("DashcamPrefs", MODE_PRIVATE).getString("pref_custom_storage_uri", "")
+            val effectiveUriStr = StorageManager.getEffectiveStorageUri(this)
 
-            if (customUriStr.isNullOrEmpty()) {
+            if (effectiveUriStr == null) {
                 currentVideoUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
                     put(MediaStore.Video.Media.DISPLAY_NAME, currentVideoName)
                     put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/MyDashcam")
@@ -607,7 +628,7 @@ class CameraService : LifecycleService() {
                     if (srtUri != null) srtOutputStream = contentResolver.openOutputStream(srtUri)
                 }
             } else {
-                val treeUri = customUriStr.toUri()
+                val treeUri = effectiveUriStr.toUri()
                 val docDir = DocumentFile.fromTreeUri(this, treeUri)
 
                 val videoDoc = docDir?.createFile("video/mp4", currentVideoName!!)
