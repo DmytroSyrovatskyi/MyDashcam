@@ -33,6 +33,8 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.createBitmap
+import androidx.core.net.toUri
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import com.example.mydashcam.utils.NotificationHelper
@@ -130,7 +132,6 @@ class CameraService : LifecycleService() {
         const val RECORDING_DURATION_MS = 600000L
     }
 
-    // Защита от фантомного пробега
     private val locationListener = LocationListener { location ->
         var rawSpeedKmH = 0f
         var currentDist = 0f
@@ -160,7 +161,6 @@ class CameraService : LifecycleService() {
         if (smoothedSpeedKmH < 3f) {
             smoothedSpeedKmH = 0f
         } else {
-            // Метры прибавляются ТОЛЬКО если скорость выше 3 км/ч
             tripDistanceMeters += currentDist
         }
 
@@ -398,7 +398,6 @@ class CameraService : LifecycleService() {
         }
     }
 
-    // ИСПРАВЛЕНИЕ: Отключено искусственное затемнение (EV), автоэкспозиция работает штатно
     private fun startDynamicUpdates() {
         dynamicUpdateJob?.cancel()
         dynamicUpdateJob = lifecycleScope.launch {
@@ -437,8 +436,19 @@ class CameraService : LifecycleService() {
         if (isRecordingActive && uri != null && name != null) {
             stopHardware()
             val newName = name.replace("BVR_PRO_", "LOCKED_BVR_PRO_")
-            contentResolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.DISPLAY_NAME, newName) }, null, null)
-            StorageManager.renameCompanionSrt(this, name, newName)
+            val customUriStr = getSharedPreferences("DashcamPrefs", MODE_PRIVATE).getString("pref_custom_storage_uri", "")
+
+            if (customUriStr.isNullOrEmpty()) {
+                contentResolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.DISPLAY_NAME, newName) }, null, null)
+                StorageManager.renameCompanionSrt(this, name, newName)
+            } else {
+                try {
+                    val treeUri = customUriStr.toUri()
+                    val docDir = DocumentFile.fromTreeUri(this, treeUri)
+                    docDir?.findFile(name)?.renameTo(newName)
+                    docDir?.findFile(name.replace(".mp4", ".srt"))?.renameTo(newName.replace(".mp4", ".srt"))
+                } catch (_: Exception) {}
+            }
             startHardwareLoop()
         }
     }
@@ -515,7 +525,6 @@ class CameraService : LifecycleService() {
                     val extender = Camera2Interop.Extender(builder)
 
                     extender.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, bestRange)
-                    // ИСПРАВЛЕНИЕ: Убрали жесткий CONTROL_AF_MODE, чтобы CameraX сам выбрал лучший режим автофокуса
                     extender.setCaptureRequestOption(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON)
                     extender.setCaptureRequestOption(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_ON)
 
@@ -580,20 +589,35 @@ class CameraService : LifecycleService() {
             currentVideoName = "BVR_PRO_$timestamp.mp4"
             val srtName = "BVR_PRO_$timestamp.srt"
 
-            currentVideoUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
-                put(MediaStore.Video.Media.DISPLAY_NAME, currentVideoName)
-                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/MyDashcam")
-            })
+            val customUriStr = getSharedPreferences("DashcamPrefs", MODE_PRIVATE).getString("pref_custom_storage_uri", "")
 
-            pfd = contentResolver.openFileDescriptor(currentVideoUri!!, "rw")
-
-            if (prefStampDate || prefStampSpeed || prefStampGps || prefStampGForce) {
-                val srtUri = contentResolver.insert(MediaStore.Files.getContentUri("external"), ContentValues().apply {
-                    put(MediaStore.Files.FileColumns.DISPLAY_NAME, srtName)
-                    put(MediaStore.Files.FileColumns.MIME_TYPE, "application/x-subrip")
-                    put(MediaStore.Files.FileColumns.RELATIVE_PATH, "Movies/MyDashcam")
+            if (customUriStr.isNullOrEmpty()) {
+                currentVideoUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
+                    put(MediaStore.Video.Media.DISPLAY_NAME, currentVideoName)
+                    put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/MyDashcam")
                 })
-                if (srtUri != null) srtOutputStream = contentResolver.openOutputStream(srtUri)
+                pfd = currentVideoUri?.let { contentResolver.openFileDescriptor(it, "rw") }
+
+                if (prefStampDate || prefStampSpeed || prefStampGps || prefStampGForce) {
+                    val srtUri = contentResolver.insert(MediaStore.Files.getContentUri("external"), ContentValues().apply {
+                        put(MediaStore.Files.FileColumns.DISPLAY_NAME, srtName)
+                        put(MediaStore.Files.FileColumns.MIME_TYPE, "application/x-subrip")
+                        put(MediaStore.Files.FileColumns.RELATIVE_PATH, "Movies/MyDashcam")
+                    })
+                    if (srtUri != null) srtOutputStream = contentResolver.openOutputStream(srtUri)
+                }
+            } else {
+                val treeUri = customUriStr.toUri()
+                val docDir = DocumentFile.fromTreeUri(this, treeUri)
+
+                val videoDoc = docDir?.createFile("video/mp4", currentVideoName!!)
+                currentVideoUri = videoDoc?.uri
+                pfd = currentVideoUri?.let { contentResolver.openFileDescriptor(it, "rw") }
+
+                if (prefStampDate || prefStampSpeed || prefStampGps || prefStampGForce) {
+                    val srtDoc = docDir?.createFile("application/x-subrip", srtName)
+                    srtOutputStream = srtDoc?.uri?.let { contentResolver.openOutputStream(it) }
+                }
             }
 
             mediaRecorder = MediaRecorder(this).apply {

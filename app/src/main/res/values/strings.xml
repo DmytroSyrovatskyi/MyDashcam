@@ -1,5 +1,5 @@
 <resources>
-    <string name="google_client_id">336848115417-4jedm5rv4h4ptsgkaq3g6be3puidm3e0.apps.googleusercontent.com</string>
+    <string name="google_client_id" translatable="false">336848115417-4jedm5rv4h4ptsgkaq3g6be3puidm3e0.apps.googleusercontent.com</string>
 
     <string name="app_name">My Dashcam</string>
 
@@ -85,6 +85,20 @@
     <string name="cloud_btn_restore">⬇️ Restore from Cloud</string>
 
     <string name="toast_gps_warning">⚠️ Enable Location (GPS) for speed overlay!</string>
+
+    <string name="storage_location">Storage Location</string>
+    <string name="storage_internal_default">Internal Storage (Default)</string>
+    <string name="storage_external_selected">External Storage Selected 📁</string>
+    <string name="storage_warning_disconnected">⚠️ External Drive Disconnected! Recording to phone.</string>
+    <string name="btn_select_folder">Select Folder</string>
+    <string name="btn_reset_default">Reset to Default</string>
+    <string name="msg_storage_changed">Storage folder changed!</string>
+    <string name="msg_storage_reset">Reset to Internal Storage</string>
+
+    <string name="msg_overlay_permission_needed">Allow \'Display over apps\' for reliable auto-start!</string>
+
+    <string name="msg_unlock_first">Unlock the file first to delete!</string>
+    <string name="msg_settings_stop_record">Stop recording to change settings</string>
 
 
 </resources>

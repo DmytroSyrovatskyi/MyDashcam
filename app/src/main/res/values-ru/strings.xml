@@ -83,4 +83,18 @@
     <string name="cloud_btn_restore">⬇️ Загрузить из облака</string>
 
     <string name="toast_gps_warning">⚠️ Включите Локацию (GPS) для скорости!</string>
+
+    <string name="storage_location">Место сохранения (SSD / SD)</string>
+    <string name="storage_internal_default">Внутренняя память (По умолчанию)</string>
+    <string name="storage_external_selected">Выбрана внешняя папка 📁</string>
+    <string name="storage_warning_disconnected">⚠️ Накопитель отключен! Пишем в телефон.</string>
+    <string name="btn_select_folder">Выбрать папку</string>
+    <string name="btn_reset_default">Сбросить по умолчанию</string>
+    <string name="msg_storage_changed">Папка сохранения изменена!</string>
+    <string name="msg_storage_reset">Сброшено на Внутреннюю память</string>
+
+    <string name="msg_overlay_permission_needed">Дайте разрешение \'Поверх окон\' для надежного автозапуска!</string>
+
+    <string name="msg_unlock_first">Сначала снимите защиту с файла!</string>
+    <string name="msg_settings_stop_record">Остановите запись для настройки</string>
 </resources>

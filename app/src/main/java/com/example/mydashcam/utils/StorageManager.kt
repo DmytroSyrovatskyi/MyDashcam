@@ -9,13 +9,28 @@ import android.os.Looper
 import android.os.StatFs
 import android.provider.MediaStore
 import android.widget.Toast
+import androidx.core.net.toUri
+import androidx.documentfile.provider.DocumentFile
 import com.example.mydashcam.R
 
 object StorageManager {
 
     fun checkStorageSpace(context: Context): Boolean {
         try {
-            val stat = StatFs(Environment.getExternalStorageDirectory().path)
+            val customUriStr = context.getSharedPreferences("DashcamPrefs", Context.MODE_PRIVATE).getString("pref_custom_storage_uri", "")
+
+            val stat = if (customUriStr.isNullOrEmpty()) {
+                StatFs(Environment.getExternalStorageDirectory().path)
+            } else {
+                val treeUri = customUriStr.toUri()
+                val docFile = DocumentFile.fromTreeUri(context, treeUri)
+
+                val pfd = context.contentResolver.openFileDescriptor(docFile!!.uri, "r")
+                val fdStat = StatFs("/proc/self/fd/${pfd!!.fd}")
+                pfd.close()
+                fdStat
+            }
+
             val freeBytes = stat.availableBlocksLong * stat.blockSizeLong
             val freeMb = freeBytes / (1024 * 1024)
 
@@ -36,21 +51,39 @@ object StorageManager {
     fun manageLoopStorage(context: Context, limit: Int) {
         if (limit > 50) return
         try {
-            context.contentResolver.query(
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.DISPLAY_NAME),
-                "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ? AND ${MediaStore.Video.Media.DISPLAY_NAME} LIKE ?",
-                arrayOf("%Movies/MyDashcam%", "BVR_PRO_%"),
-                "${MediaStore.Video.Media.DATE_ADDED} ASC"
-            )?.use { c ->
-                var toDel = c.count - limit + 1
-                while (c.moveToNext() && toDel > 0) {
-                    val id = c.getLong(0)
-                    val name = c.getString(1)
-                    val uri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+            val customUriStr = context.getSharedPreferences("DashcamPrefs", Context.MODE_PRIVATE).getString("pref_custom_storage_uri", "")
 
-                    context.contentResolver.delete(uri, null, null)
-                    deleteCompanionSrt(context, name) // НОВОЕ: Удаляем субтитры мусора
+            if (customUriStr.isNullOrEmpty()) {
+                context.contentResolver.query(
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                    arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.DISPLAY_NAME),
+                    "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ? AND ${MediaStore.Video.Media.DISPLAY_NAME} LIKE ?",
+                    arrayOf("%Movies/MyDashcam%", "BVR_PRO_%"),
+                    "${MediaStore.Video.Media.DATE_ADDED} ASC"
+                )?.use { c ->
+                    var toDel = c.count - limit + 1
+                    while (c.moveToNext() && toDel > 0) {
+                        val id = c.getLong(0)
+                        val name = c.getString(1)
+                        val uri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+
+                        context.contentResolver.delete(uri, null, null)
+                        deleteCompanionSrt(context, name)
+                        toDel--
+                    }
+                }
+            } else {
+                val treeUri = customUriStr.toUri()
+                val docDir = DocumentFile.fromTreeUri(context, treeUri)
+
+                val files = docDir?.listFiles()?.filter { it.name?.startsWith("BVR_PRO_") == true }?.sortedBy { it.lastModified() } ?: emptyList()
+                var toDel = files.size - limit + 1
+
+                for (file in files) {
+                    if (toDel <= 0) break
+                    val name = file.name ?: continue
+                    file.delete()
+                    docDir?.findFile(name.replace(".mp4", ".srt"))?.delete()
                     toDel--
                 }
             }
@@ -60,18 +93,24 @@ object StorageManager {
     fun getFilesCount(context: Context): Int {
         var count = 0
         try {
-            context.contentResolver.query(
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                arrayOf(MediaStore.Video.Media._ID),
-                "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ? AND ${MediaStore.Video.Media.DISPLAY_NAME} LIKE ?",
-                arrayOf("%Movies/MyDashcam%", "BVR_PRO_%"),
-                null
-            )?.use { c -> count = c.count }
+            val customUriStr = context.getSharedPreferences("DashcamPrefs", Context.MODE_PRIVATE).getString("pref_custom_storage_uri", "")
+            if (customUriStr.isNullOrEmpty()) {
+                context.contentResolver.query(
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                    arrayOf(MediaStore.Video.Media._ID),
+                    "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ? AND ${MediaStore.Video.Media.DISPLAY_NAME} LIKE ?",
+                    arrayOf("%Movies/MyDashcam%", "BVR_PRO_%"),
+                    null
+                )?.use { c -> count = c.count }
+            } else {
+                val treeUri = customUriStr.toUri()
+                val docDir = DocumentFile.fromTreeUri(context, treeUri)
+                count = docDir?.listFiles()?.count { it.name?.startsWith("BVR_PRO_") == true } ?: 0
+            }
         } catch (_: Exception) {}
         return count
     }
 
-    // НОВОЕ: Функции для управления файлом субтитров
     fun deleteCompanionSrt(context: Context, videoName: String) {
         val srtName = videoName.substringBeforeLast(".") + ".srt"
         try {
