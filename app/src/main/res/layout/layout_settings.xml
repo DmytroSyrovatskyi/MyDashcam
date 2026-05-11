@@ -1,0 +1,526 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_title"
+            android:textColor="#FFFFFF"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="24dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_settings_card"
+            android:orientation="vertical"
+            android:padding="20dp"
+            android:layout_marginBottom="24dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/set_header_lang"
+                android:textColor="#8E8E93"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="16dp" />
+
+            <RadioGroup
+                android:id="@+id/rgLang"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:background="@drawable/bg_segmented_track"
+                android:padding="4dp"
+                android:layout_marginBottom="24dp">
+
+                <RadioButton
+                    android:id="@+id/rbRu"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:button="@null"
+                    android:background="@drawable/selector_segmented_bg"
+                    android:textColor="@color/selector_segmented_text"
+                    android:gravity="center"
+                    android:paddingVertical="12dp"
+                    android:textStyle="bold"
+                    android:text="@string/set_opt_ru"
+                    tools:ignore="VisualLintButtonSize" />
+
+                <RadioButton
+                    android:id="@+id/rbEn"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:button="@null"
+                    android:background="@drawable/selector_segmented_bg"
+                    android:textColor="@color/selector_segmented_text"
+                    android:gravity="center"
+                    android:paddingVertical="12dp"
+                    android:textStyle="bold"
+                    android:text="@string/set_opt_en"
+                    tools:ignore="VisualLintButtonSize" />
+            </RadioGroup>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/storage_location"
+                android:textColor="#8E8E93"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textAllCaps="true"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
+                android:id="@+id/tvStorageInfo"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#00E5FF"
+                android:textSize="14sp"
+                android:layout_marginBottom="16dp" />
+
+            <LinearLayout
+                style="?android:attr/buttonBarStyle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnStorageSelect"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/btn_select_folder"
+                    android:textAllCaps="false"
+                    android:textColor="#FFFFFF"
+                    android:backgroundTint="#3A3A3C"
+                    android:layout_marginEnd="8dp"
+                    tools:ignore="VisualLintButtonSize,ButtonStyle" />
+
+                <Button
+                    android:id="@+id/btnStorageReset"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/btn_reset_default"
+                    android:textAllCaps="false"
+                    android:textColor="#FFFFFF"
+                    android:backgroundTint="#3A3A3C"
+                    tools:ignore="VisualLintButtonSize,ButtonStyle" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_settings_card"
+            android:orientation="vertical"
+            android:padding="20dp"
+            android:layout_marginBottom="24dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/set_header_lens"
+                android:textColor="#8E8E93"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="16dp" />
+
+            <RadioGroup
+                android:id="@+id/rgLens"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:background="@drawable/bg_segmented_track"
+                android:padding="4dp"
+                android:layout_marginBottom="24dp">
+
+                <RadioButton
+                    android:id="@+id/rbLensWide"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:button="@null"
+                    android:background="@drawable/selector_segmented_bg"
+                    android:textColor="@color/selector_segmented_text"
+                    android:gravity="center"
+                    android:paddingVertical="12dp"
+                    android:textStyle="bold"
+                    android:text="@string/set_opt_wide"
+                    tools:ignore="VisualLintButtonSize" />
+
+                <RadioButton
+                    android:id="@+id/rbLensMain"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:button="@null"
+                    android:background="@drawable/selector_segmented_bg"
+                    android:textColor="@color/selector_segmented_text"
+                    android:gravity="center"
+                    android:paddingVertical="12dp"
+                    android:textStyle="bold"
+                    android:text="@string/set_opt_main"
+                    tools:ignore="VisualLintButtonSize" />
+
+                <RadioButton
+                    android:id="@+id/rbLensFront"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:button="@null"
+                    android:background="@drawable/selector_segmented_bg"
+                    android:textColor="@color/selector_segmented_text"
+                    android:gravity="center"
+                    android:paddingVertical="12dp"
+                    android:textStyle="bold"
+                    android:text="@string/set_opt_front"
+                    tools:ignore="VisualLintButtonSize" />
+            </RadioGroup>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/set_header_res"
+                android:textColor="#8E8E93"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="16dp" />
+
+            <RadioGroup
+                android:id="@+id/rgRes"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:background="@drawable/bg_segmented_track"
+                android:padding="4dp"
+                android:layout_marginBottom="24dp">
+
+                <RadioButton
+                    android:id="@+id/rbRes1080"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:button="@null"
+                    android:background="@drawable/selector_segmented_bg"
+                    android:textColor="@color/selector_segmented_text"
+                    android:gravity="center"
+                    android:paddingVertical="12dp"
+                    android:textStyle="bold"
+                    android:text="@string/set_opt_1080"
+                    tools:ignore="VisualLintButtonSize" />
+
+                <RadioButton
+                    android:id="@+id/rbRes720"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:button="@null"
+                    android:background="@drawable/selector_segmented_bg"
+                    android:textColor="@color/selector_segmented_text"
+                    android:gravity="center"
+                    android:paddingVertical="12dp"
+                    android:textStyle="bold"
+                    android:text="@string/set_opt_720"
+                    tools:ignore="VisualLintButtonSize" />
+
+                <RadioButton
+                    android:id="@+id/rbRes4K"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:button="@null"
+                    android:background="@drawable/selector_segmented_bg"
+                    android:textColor="@color/selector_segmented_text"
+                    android:gravity="center"
+                    android:paddingVertical="12dp"
+                    android:textStyle="bold"
+                    android:text="@string/set_opt_4k"
+                    tools:ignore="VisualLintButtonSize" />
+            </RadioGroup>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/set_header_fps"
+                android:textColor="#8E8E93"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="16dp" />
+
+            <RadioGroup
+                android:id="@+id/rgFps"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:background="@drawable/bg_segmented_track"
+                android:padding="4dp"
+                android:layout_marginBottom="24dp">
+
+                <RadioButton
+                    android:id="@+id/rbFps30"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:button="@null"
+                    android:background="@drawable/selector_segmented_bg"
+                    android:textColor="@color/selector_segmented_text"
+                    android:gravity="center"
+                    android:paddingVertical="12dp"
+                    android:textStyle="bold"
+                    android:text="@string/set_opt_30fps"
+                    tools:ignore="VisualLintButtonSize" />
+
+                <RadioButton
+                    android:id="@+id/rbFps60"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:button="@null"
+                    android:background="@drawable/selector_segmented_bg"
+                    android:textColor="@color/selector_segmented_text"
+                    android:gravity="center"
+                    android:paddingVertical="12dp"
+                    android:textStyle="bold"
+                    android:text="@string/set_opt_60fps"
+                    tools:ignore="VisualLintButtonSize" />
+            </RadioGroup>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/set_header_codec"
+                android:textColor="#8E8E93"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="16dp" />
+
+            <RadioGroup
+                android:id="@+id/rgCodec"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:background="@drawable/bg_segmented_track"
+                android:padding="4dp">
+
+                <RadioButton
+                    android:id="@+id/rbCodecAuto"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:button="@null"
+                    android:background="@drawable/selector_segmented_bg"
+                    android:textColor="@color/selector_segmented_text"
+                    android:gravity="center"
+                    android:paddingVertical="12dp"
+                    android:textStyle="bold"
+                    android:text="@string/set_opt_auto"
+                    tools:ignore="VisualLintButtonSize" />
+
+                <RadioButton
+                    android:id="@+id/rbCodecHevc"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:button="@null"
+                    android:background="@drawable/selector_segmented_bg"
+                    android:textColor="@color/selector_segmented_text"
+                    android:gravity="center"
+                    android:paddingVertical="12dp"
+                    android:textStyle="bold"
+                    android:text="@string/set_opt_hevc"
+                    tools:ignore="VisualLintButtonSize" />
+
+                <RadioButton
+                    android:id="@+id/rbCodecAvc"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:button="@null"
+                    android:background="@drawable/selector_segmented_bg"
+                    android:textColor="@color/selector_segmented_text"
+                    android:gravity="center"
+                    android:paddingVertical="12dp"
+                    android:textStyle="bold"
+                    android:text="@string/set_opt_h264"
+                    tools:ignore="VisualLintButtonSize" />
+            </RadioGroup>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_settings_card"
+            android:orientation="vertical"
+            android:padding="20dp"
+            android:layout_marginBottom="24dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/set_header_auto"
+                android:textColor="#8E8E93"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="16dp" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swPip"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/set_sw_pip"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp"
+                android:paddingVertical="12dp"
+                tools:ignore="VisualLintButtonSize" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swAutoCharge"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/set_sw_charge"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp"
+                android:paddingVertical="12dp"
+                tools:ignore="VisualLintButtonSize" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swAutoBt"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/set_sw_bt"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp"
+                android:paddingVertical="12dp"
+                tools:ignore="VisualLintButtonSize" />
+
+            <TextView
+                android:id="@+id/tvBtDevice"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#8E8E93"
+                android:textSize="12sp"
+                android:paddingBottom="12dp"
+                android:visibility="gone" />
+
+            <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#2C2C2E" android:layout_marginVertical="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/set_header_stamp"
+                android:textColor="#8E8E93"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:layout_marginVertical="16dp" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swStampDate"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/set_sw_date"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp"
+                android:paddingVertical="12dp"
+                tools:ignore="VisualLintButtonSize" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swStampSpeed"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/set_sw_speed"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp"
+                android:paddingVertical="12dp"
+                tools:ignore="VisualLintButtonSize" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swStampGps"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/set_sw_gps"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp"
+                android:paddingVertical="12dp"
+                tools:ignore="VisualLintButtonSize" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swStampGforce"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/set_sw_gforce"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp"
+                android:paddingVertical="12dp"
+                tools:ignore="VisualLintButtonSize" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_settings_card"
+            android:orientation="vertical"
+            android:padding="20dp"
+            android:layout_marginBottom="24dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/set_header_limit"
+                android:textColor="#8E8E93"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
+                android:id="@+id/tvLoopTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/set_cycle_note"
+                android:textColor="#8E8E93"
+                android:textSize="12sp"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/tvStorageEst"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#00E5FF"
+                android:textSize="14sp"
+                android:layout_marginBottom="16dp" />
+
+            <SeekBar
+                android:id="@+id/seekStorage"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="18"
+                android:paddingVertical="16dp" />
+        </LinearLayout>
+
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>

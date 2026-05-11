@@ -2,8 +2,12 @@ package com.example.mydashcam
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothDevice
+import android.content.BroadcastReceiver
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
@@ -109,6 +113,42 @@ class CameraService : LifecycleService() {
     private var reusableBitmap: Bitmap? = null
     private val binder = LocalBinder()
 
+    // ДИНАМИЧЕСКИЙ РЕСИВЕР ДЛЯ АВТОСТАРТА
+    private val autoStartReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
+            val isAutoCharge = prefs.getBoolean("pref_autostart", false)
+            val isAutoBt = prefs.getBoolean("pref_autostart_bt", false)
+            val targetBtMac = prefs.getString("pref_bt_mac", "")
+            val isRu = Locale.getDefault().language == "ru"
+
+            when (intent.action) {
+                Intent.ACTION_POWER_CONNECTED -> {
+                    if (isAutoCharge && !isRecordingActive) {
+                        val startIntent = Intent(context, CameraService::class.java).apply { action = ACTION_START }
+                        ContextCompat.startForegroundService(context, startIntent)
+                        Toast.makeText(context, if (isRu) "🔌 Питание: Старт записи" else "🔌 Power: Recording started", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                Intent.ACTION_POWER_DISCONNECTED -> {
+                    if (isAutoCharge && isRecordingActive) {
+                        val stopIntent = Intent(context, CameraService::class.java).apply { action = ACTION_STOP }
+                        ContextCompat.startForegroundService(context, stopIntent)
+                        Toast.makeText(context, if (isRu) "🔋 Питание: Стоп записи" else "🔋 Power: Recording stopped", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                    val device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                    if (isAutoBt && device?.address == targetBtMac && !isRecordingActive) {
+                        val startIntent = Intent(context, CameraService::class.java).apply { action = ACTION_START }
+                        ContextCompat.startForegroundService(context, startIntent)
+                        Toast.makeText(context, if (isRu) "🚙 Bluetooth: Старт записи" else "🚙 Bluetooth: Recording started", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+
     inner class LocalBinder : Binder() {
         fun setPreviewListener(listener: ((Bitmap, Int) -> Unit)?) {
             previewCallback = listener
@@ -188,6 +228,7 @@ class CameraService : LifecycleService() {
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     }
 
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     override fun onCreate() {
         super.onCreate()
         powerManager = getSystemService(POWER_SERVICE) as PowerManager
@@ -198,6 +239,14 @@ class CameraService : LifecycleService() {
         setupThermalListener()
         setupOrientationListener()
         loadPrefs()
+
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_POWER_CONNECTED)
+            addAction(Intent.ACTION_POWER_DISCONNECTED)
+            addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+        }
+        // ИСПРАВЛЕНИЕ: Убрали избыточный квалификатор Context. перед RECEIVER_EXPORTED
+        registerReceiver(autoStartReceiver, filter, RECEIVER_EXPORTED)
     }
 
     private fun loadPrefs() {
@@ -700,6 +749,12 @@ class CameraService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        try {
+            unregisterReceiver(autoStartReceiver)
+        } catch (_: Exception) {
+            // Игнорируем, если не был зарегистрирован
+        }
+
         stopLocationTracking()
         orientationEventListener?.disable()
         thermalListener?.let { powerManager?.removeThermalStatusListener(it) }

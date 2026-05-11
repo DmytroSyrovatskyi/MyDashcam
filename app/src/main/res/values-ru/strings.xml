@@ -20,7 +20,7 @@
     <string name="btn_delete">УДАЛИТЬ</string>
     <string name="btn_cancel">@android:string/cancel</string>
     <string name="btn_save_config">СОХРАНИТЬ</string>
-    <string name="settings_title">Настройки приложения</string>
+    <string name="settings_title">Настройки</string>
 
     <string name="video_time_range">%1$s — %2$s</string>
     <string name="video_info_format">%1$d мин • %2$s</string>
@@ -73,7 +73,6 @@
     <string name="msg_import_success">Импортировано %1$d поездок</string>
     <string name="msg_import_error">Ошибка: неверный формат файла</string>
 
-
     <string name="desc_cloud_sync">Синхронизация</string>
     <string name="cloud_title">Синхронизация с Google Drive</string>
     <string name="cloud_status_not_signed">Вы не вошли в аккаунт</string>
@@ -97,4 +96,47 @@
 
     <string name="msg_unlock_first">Сначала снимите защиту с файла!</string>
     <string name="msg_settings_stop_record">Остановите запись для настройки</string>
+
+    <string name="set_header_lang">ЯЗЫК</string>
+    <string name="set_header_lens">ОБЪЕКТИВ</string>
+    <string name="set_header_res">РАЗРЕШЕНИЕ</string>
+    <string name="set_header_fps">КАДРЫ В СЕКУНДУ</string>
+    <string name="set_header_codec">ФОРМАТ ВИДЕО</string>
+    <string name="set_header_auto">АВТОМАТИКА</string>
+    <string name="set_header_stamp">ШТАМПЫ (СУБТИТРЫ)</string>
+    <string name="set_header_limit">ЛИМИТ ПАМЯТИ</string>
+
+    <string name="set_opt_ru">РУССКИЙ</string>
+    <string name="set_opt_en">ENGLISH</string>
+    <string name="set_opt_wide">Ширик</string>
+    <string name="set_opt_main">Основа</string>
+    <string name="set_opt_front">Салон</string>
+    <string name="set_opt_1080">1080p</string>
+    <string name="set_opt_720">720p</string>
+    <string name="set_opt_4k">4K</string>
+    <string name="set_opt_30fps">30 FPS</string>
+    <string name="set_opt_60fps">60 FPS</string>
+    <string name="set_opt_auto">АВТО</string>
+    <string name="set_opt_hevc">HEVC</string>
+    <string name="set_opt_h264">H.264</string>
+
+    <string name="set_sw_pip">Режим «Окно в окне»</string>
+    <string name="set_sw_charge">Авто-старт при зарядке</string>
+    <string name="set_sw_bt">Авто-старт по Bluetooth</string>
+    <string name="set_sw_date">Дата и Время</string>
+    <string name="set_sw_speed">Скорость (км/ч)</string>
+    <string name="set_sw_gps">Координаты (GPS)</string>
+    <string name="set_sw_gforce">G-Сенсор</string>
+
+    <string name="set_device_none">Устройство не выбрано</string>
+    <string name="set_select_audio">Выберите магнитолу</string>
+    <string name="set_no_devices">Нет сопряженных устройств</string>
+    <string name="set_fps_exp">60 FPS (Эксперимент)</string>
+    <string name="set_loop_off">Перезапись: ВЫКЛ</string>
+    <string name="set_loop_count">Файлов в цикле: %1$d (По 10 мин)</string>
+    <string name="set_est_auto">Объем: %1$.1f - %2$.1f ГБ</string>
+    <string name="set_est_fixed">Объем цикла: %1$.1f ГБ</string>
+    <string name="set_cycle_note">⏱ 1 цикл = 10 минут</string>
+
+    <string name="filter_all">ВСЁ</string>
 </resources>

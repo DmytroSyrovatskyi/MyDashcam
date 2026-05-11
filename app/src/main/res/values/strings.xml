@@ -75,7 +75,6 @@
     <string name="msg_import_success">Imported %1$d trips</string>
     <string name="msg_import_error">Import error: Invalid file</string>
 
-
     <string name="desc_cloud_sync">Cloud Sync</string>
     <string name="cloud_title">Google Drive Sync</string>
     <string name="cloud_status_not_signed">Not signed in</string>
@@ -100,5 +99,46 @@
     <string name="msg_unlock_first">Unlock the file first to delete!</string>
     <string name="msg_settings_stop_record">Stop recording to change settings</string>
 
+    <string name="set_header_lang">LANGUAGE</string>
+    <string name="set_header_lens">CAMERA LENS</string>
+    <string name="set_header_res">RESOLUTION</string>
+    <string name="set_header_fps">FRAMES PER SECOND</string>
+    <string name="set_header_codec">VIDEO CODEC</string>
+    <string name="set_header_auto">AUTOMATION</string>
+    <string name="set_header_stamp">VIDEO OVERLAY (SUBTITLES)</string>
+    <string name="set_header_limit">STORAGE LIMIT</string>
 
+    <string name="set_opt_ru">РУССКИЙ</string>
+    <string name="set_opt_en">ENGLISH</string>
+    <string name="set_opt_wide">Wide</string>
+    <string name="set_opt_main">Main</string>
+    <string name="set_opt_front">Front</string>
+    <string name="set_opt_1080">1080p</string>
+    <string name="set_opt_720">720p</string>
+    <string name="set_opt_4k">4K</string>
+    <string name="set_opt_30fps">30 FPS</string>
+    <string name="set_opt_60fps">60 FPS</string>
+    <string name="set_opt_auto">AUTO</string>
+    <string name="set_opt_hevc">HEVC</string>
+    <string name="set_opt_h264">H.264</string>
+
+    <string name="set_sw_pip">Picture-in-Picture (PiP)</string>
+    <string name="set_sw_charge">Auto-start on Charge</string>
+    <string name="set_sw_bt">Auto-start on Bluetooth</string>
+    <string name="set_sw_date">Date &amp; Time</string>
+    <string name="set_sw_speed">Speed (km/h)</string>
+    <string name="set_sw_gps">GPS Coordinates</string>
+    <string name="set_sw_gforce">G-Sensor</string>
+
+    <string name="set_device_none">No device selected</string>
+    <string name="set_select_audio">Select Car Audio</string>
+    <string name="set_no_devices">No paired devices</string>
+    <string name="set_fps_exp">60 FPS (Experimental)</string>
+    <string name="set_loop_off">Loop Record: OFF</string>
+    <string name="set_loop_count">Files in loop: %1$d (10 min each)</string>
+    <string name="set_est_auto">Est. space: %1$.1f - %2$.1f GB</string>
+    <string name="set_est_fixed">Estimated loop: %1$.1f GB</string>
+    <string name="set_cycle_note">⏱ 1 cycle = 10 minutes</string>
+
+    <string name="filter_all">ALL</string>
 </resources>

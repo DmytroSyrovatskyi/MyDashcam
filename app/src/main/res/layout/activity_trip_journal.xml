@@ -6,143 +6,151 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="@color/ui_background">
-
-    <androidx.cardview.widget.CardView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        app:cardBackgroundColor="@color/ui_surface"
-        app:cardElevation="4dp">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:padding="16dp">
-
-            <ImageButton
-                android:id="@+id/btnBack"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:src="@android:drawable/ic_menu_revert"
-                app:tint="@color/text_active"
-                android:contentDescription="@string/desc_back" />
-
-            <TextView
-                android:id="@+id/tvTitle"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/desc_trip_journal"
-                android:textColor="@color/text_active"
-                android:textSize="20sp"
-                android:textStyle="bold"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp" />
-
-            <!-- НОВАЯ КНОПКА: Облачная синхронизация -->
-            <ImageButton
-                android:id="@+id/btnCloudSync"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:src="@android:drawable/ic_popup_sync"
-                app:tint="#BA68C8"
-                android:contentDescription="@string/desc_cloud_sync" />
-
-            <ImageButton
-                android:id="@+id/btnImport"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:src="@android:drawable/ic_menu_add"
-                app:tint="#42A5F5"
-                android:contentDescription="@string/desc_import" />
-
-            <ImageButton
-                android:id="@+id/btnExport"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:src="@android:drawable/ic_menu_save"
-                app:tint="#66BB6A"
-                android:contentDescription="@string/desc_export" />
-        </LinearLayout>
-    </androidx.cardview.widget.CardView>
+    android:background="#000000">
 
     <LinearLayout
-        style="?android:attr/buttonBarStyle"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="16dp">
+        android:gravity="center_vertical"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="32dp"
+        android:paddingBottom="16dp">
+
+        <ImageButton
+            android:id="@+id/btnBack"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_revert"
+            app:tint="#FFFFFF"
+            android:contentDescription="@string/desc_back" />
+
+        <TextView
+            android:id="@+id/tvTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/desc_trip_journal"
+            android:textColor="#FFFFFF"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp" />
+
+        <ImageButton
+            android:id="@+id/btnCloudSync"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_popup_sync"
+            app:tint="#00E5FF"
+            android:contentDescription="@string/desc_cloud_sync" />
+
+        <ImageButton
+            android:id="@+id/btnImport"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_add"
+            app:tint="#B3B3B3"
+            android:contentDescription="@string/desc_import" />
+
+        <ImageButton
+            android:id="@+id/btnExport"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_save"
+            app:tint="#B3B3B3"
+            android:contentDescription="@string/desc_export" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="16dp"
+        android:background="@drawable/bg_segmented_track"
+        android:padding="4dp"
+        android:orientation="horizontal"
+        tools:ignore="ButtonStyle">
 
         <Button
             android:id="@+id/btnToday"
-            style="?android:attr/buttonBarButtonStyle"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginEnd="4dp"
-            android:minHeight="48dp"
-            android:paddingVertical="12dp"
-            android:backgroundTint="#333333"
-            android:textColor="@color/text_active"
-            android:textSize="12sp"
+            android:minHeight="42dp"
+            android:background="@drawable/selector_segmented_bg"
+            app:backgroundTint="@null"
+            android:textColor="@color/selector_segmented_text"
+            android:textSize="11sp"
+            android:textStyle="bold"
             android:text="@string/filter_today"
-            tools:ignore="VisualLintButtonSize,TouchTargetSizeCheck" />
+            tools:ignore="VisualLintButtonSize,TouchTargetSizeCheck,ButtonStyle" />
 
         <Button
             android:id="@+id/btnWeek"
-            style="?android:attr/buttonBarButtonStyle"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginEnd="4dp"
-            android:minHeight="48dp"
-            android:paddingVertical="12dp"
-            android:backgroundTint="#333333"
-            android:textColor="@color/text_active"
-            android:textSize="12sp"
+            android:minHeight="42dp"
+            android:background="@drawable/selector_segmented_bg"
+            app:backgroundTint="@null"
+            android:textColor="@color/selector_segmented_text"
+            android:textSize="11sp"
+            android:textStyle="bold"
             android:text="@string/filter_week"
-            tools:ignore="VisualLintButtonSize,TouchTargetSizeCheck" />
+            tools:ignore="VisualLintButtonSize,TouchTargetSizeCheck,ButtonStyle" />
 
         <Button
             android:id="@+id/btnMonth"
-            style="?android:attr/buttonBarButtonStyle"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginEnd="4dp"
-            android:minHeight="48dp"
-            android:paddingVertical="12dp"
-            android:backgroundTint="#333333"
-            android:textColor="@color/text_active"
-            android:textSize="12sp"
+            android:minHeight="42dp"
+            android:background="@drawable/selector_segmented_bg"
+            app:backgroundTint="@null"
+            android:textColor="@color/selector_segmented_text"
+            android:textSize="11sp"
+            android:textStyle="bold"
             android:text="@string/filter_month"
-            tools:ignore="VisualLintButtonSize,TouchTargetSizeCheck" />
+            tools:ignore="VisualLintButtonSize,TouchTargetSizeCheck,ButtonStyle" />
+
+        <Button
+            android:id="@+id/btnAllTime"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="42dp"
+            android:background="@drawable/selector_segmented_bg"
+            app:backgroundTint="@null"
+            android:textColor="@color/selector_segmented_text"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:text="@string/filter_all"
+            tools:ignore="VisualLintButtonSize,TouchTargetSizeCheck,ButtonStyle" />
 
         <Button
             android:id="@+id/btnCalendar"
-            style="?android:attr/buttonBarButtonStyle"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="0.6"
-            android:minHeight="48dp"
-            android:paddingVertical="12dp"
-            android:backgroundTint="#333333"
-            android:textColor="@color/text_active"
+            android:minHeight="42dp"
+            android:background="@drawable/selector_segmented_bg"
+            app:backgroundTint="@null"
+            android:textColor="@color/selector_segmented_text"
             android:textSize="14sp"
             android:text="@string/filter_calendar"
-            tools:ignore="VisualLintButtonSize,TouchTargetSizeCheck" />
+            tools:ignore="VisualLintButtonSize,TouchTargetSizeCheck,ButtonStyle" />
     </LinearLayout>
 
-    <ScrollView
+    <androidx.core.widget.NestedScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
+        android:fillViewport="true"
         android:contentDescription="@string/desc_trip_journal">
 
         <LinearLayout
@@ -150,6 +158,9 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="16dp" />
-    </ScrollView>
+            android:paddingHorizontal="16dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="48dp" />
+    </androidx.core.widget.NestedScrollView>
+
 </LinearLayout>

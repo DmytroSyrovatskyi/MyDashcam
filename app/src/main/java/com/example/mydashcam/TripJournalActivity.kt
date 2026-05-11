@@ -4,10 +4,10 @@ package com.example.mydashcam
 
 import android.annotation.SuppressLint
 import android.app.AlertDialog
-import android.app.DatePickerDialog
 import android.content.ContentValues
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -21,7 +21,6 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.cardview.widget.CardView
 import androidx.core.content.edit
 import androidx.core.graphics.toColorInt
 import androidx.core.view.isVisible
@@ -33,6 +32,7 @@ import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.Scope
+import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
 import com.google.api.client.http.FileContent
 import com.google.api.client.http.javanet.NetHttpTransport
@@ -55,6 +55,13 @@ class TripJournalActivity : AppCompatActivity() {
 
     private var currentFilterStart = 0L
     private var currentFilterEnd = Long.MAX_VALUE
+
+    // Кнопки фильтров
+    private lateinit var btnToday: Button
+    private lateinit var btnWeek: Button
+    private lateinit var btnMonth: Button
+    private lateinit var btnAllTime: Button
+    private lateinit var btnCalendar: Button
 
     // Google Sign-In
     private lateinit var googleSignInClient: GoogleSignInClient
@@ -101,45 +108,106 @@ class TripJournalActivity : AppCompatActivity() {
 
         findViewById<ImageButton>(R.id.btnCloudSync).setOnClickListener { openCloudSyncDialog() }
 
-        val btnToday = findViewById<Button>(R.id.btnToday)
-        val btnWeek = findViewById<Button>(R.id.btnWeek)
-        val btnMonth = findViewById<Button>(R.id.btnMonth)
-        val btnCalendar = findViewById<Button>(R.id.btnCalendar)
+        btnToday = findViewById(R.id.btnToday)
+        btnWeek = findViewById(R.id.btnWeek)
+        btnMonth = findViewById(R.id.btnMonth)
+        btnAllTime = findViewById(R.id.btnAllTime)
+        btnCalendar = findViewById(R.id.btnCalendar)
 
-        val cal = Calendar.getInstance()
         btnToday.setOnClickListener {
-            cal.timeInMillis = System.currentTimeMillis()
-            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
-            currentFilterStart = cal.timeInMillis; currentFilterEnd = Long.MAX_VALUE
+            selectFilter(btnToday)
+            val cal = Calendar.getInstance()
+            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+            currentFilterStart = cal.timeInMillis
+            currentFilterEnd = Long.MAX_VALUE
             loadDataAndRender()
-        }
-        btnWeek.setOnClickListener {
-            cal.timeInMillis = System.currentTimeMillis(); cal.add(Calendar.DAY_OF_YEAR, -7)
-            currentFilterStart = cal.timeInMillis; currentFilterEnd = Long.MAX_VALUE
-            loadDataAndRender()
-        }
-        btnMonth.setOnClickListener {
-            cal.timeInMillis = System.currentTimeMillis(); cal.add(Calendar.DAY_OF_YEAR, -30)
-            currentFilterStart = cal.timeInMillis; currentFilterEnd = Long.MAX_VALUE
-            loadDataAndRender()
-        }
-        btnCalendar.setOnClickListener {
-            val currentCal = Calendar.getInstance()
-            DatePickerDialog(this, { _, year, month, dayOfMonth ->
-                val selectedCal = Calendar.getInstance()
-                selectedCal.set(year, month, dayOfMonth, 0, 0, 0)
-                currentFilterStart = selectedCal.timeInMillis
-                selectedCal.set(year, month, dayOfMonth, 23, 59, 59)
-                currentFilterEnd = selectedCal.timeInMillis
-                loadDataAndRender()
-            }, currentCal.get(Calendar.YEAR), currentCal.get(Calendar.MONTH), currentCal.get(Calendar.DAY_OF_MONTH)).show()
         }
 
-        loadDataAndRender()
+        btnWeek.setOnClickListener {
+            selectFilter(btnWeek)
+            val cal = Calendar.getInstance()
+            while (cal.get(Calendar.DAY_OF_WEEK) != cal.firstDayOfWeek) {
+                cal.add(Calendar.DAY_OF_MONTH, -1)
+            }
+            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+            currentFilterStart = cal.timeInMillis
+            currentFilterEnd = Long.MAX_VALUE
+            loadDataAndRender()
+        }
+
+        btnMonth.setOnClickListener {
+            selectFilter(btnMonth)
+            val cal = Calendar.getInstance()
+            cal.set(Calendar.DAY_OF_MONTH, 1)
+            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+            currentFilterStart = cal.timeInMillis
+            currentFilterEnd = Long.MAX_VALUE
+            loadDataAndRender()
+        }
+
+        btnAllTime.setOnClickListener {
+            selectFilter(btnAllTime)
+            currentFilterStart = 0L
+            currentFilterEnd = Long.MAX_VALUE
+            loadDataAndRender()
+        }
+
+        btnCalendar.setOnClickListener {
+            selectFilter(btnCalendar)
+
+            val builder = MaterialDatePicker.Builder.dateRangePicker()
+            builder.setTitleText(if (isRu) "ВЫБЕРИТЕ ПЕРИОД" else "SELECT DATE RANGE")
+
+            val picker = builder.build()
+            picker.addOnPositiveButtonClickListener { selection ->
+                val startUtc = selection.first
+                val endUtc = selection.second
+
+                val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+
+                utcCal.timeInMillis = startUtc
+                val localStart = Calendar.getInstance()
+                localStart.set(utcCal.get(Calendar.YEAR), utcCal.get(Calendar.MONTH), utcCal.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
+                currentFilterStart = localStart.timeInMillis
+
+                utcCal.timeInMillis = endUtc
+                val localEnd = Calendar.getInstance()
+                localEnd.set(utcCal.get(Calendar.YEAR), utcCal.get(Calendar.MONTH), utcCal.get(Calendar.DAY_OF_MONTH), 23, 59, 59)
+                currentFilterEnd = localEnd.timeInMillis
+
+                loadDataAndRender()
+            }
+            picker.show(supportFragmentManager, "DATE_RANGE_PICKER")
+        }
+
+        // По умолчанию выбираем "Сегодня"
+        btnToday.performClick()
 
         if (googleAccount != null) {
             smartSync(isSilent = true)
         }
+    }
+
+    private fun selectFilter(activeBtn: Button) {
+        btnToday.isSelected = false
+        btnWeek.isSelected = false
+        btnMonth.isSelected = false
+        btnAllTime.isSelected = false
+        btnCalendar.isSelected = false
+        activeBtn.isSelected = true
+    }
+
+    @Synchronized
+    private fun getCleanTrips(): List<TripRecord> {
+        val rawTrips = dbHelper.getAllTrips()
+        val uniqueTrips = rawTrips.distinctBy { it.startTime / 60000L }
+
+        if (rawTrips.size > uniqueTrips.size) {
+            dbHelper.clearAllTrips()
+            uniqueTrips.forEach { dbHelper.insertTrip(it) }
+        }
+
+        return uniqueTrips.sortedByDescending { it.startTime }
     }
 
     private fun getDriveService(): Drive? {
@@ -159,9 +227,8 @@ class TripJournalActivity : AppCompatActivity() {
                 val driveService = getDriveService() ?: throw Exception("Drive not initialized")
                 val fileList = driveService.files().list().setSpaces("appDataFolder").setQ("name = 'trip_journal_backup.csv'").execute()
 
-                val localTrips = dbHelper.getAllTrips()
+                val localTrips = getCleanTrips()
                 val sdfFull = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-                // ИСПРАВЛЕНИЕ ДУБЛИКАТОВ: сохраняем строковое представление времени, отбрасывая миллисекунды!
                 val localStartTimesStr = localTrips.map { sdfFull.format(Date(it.startTime)) }.toSet()
 
                 if (fileList.files.isNotEmpty()) {
@@ -177,7 +244,6 @@ class TripJournalActivity : AppCompatActivity() {
                             if (cols.size >= 7) {
                                 try {
                                     val csvTimeStr = "${cols[0]} ${cols[1]}"
-                                    // Проверяем по СТРОКЕ, а не по Long, чтобы избежать конфликта миллисекунд
                                     if (!localStartTimesStr.contains(csvTimeStr)) {
                                         val startMs = sdfFull.parse(csvTimeStr)?.time ?: continue
                                         var endMs = sdfFull.parse("${cols[0]} ${cols[2]}")?.time ?: continue
@@ -196,7 +262,7 @@ class TripJournalActivity : AppCompatActivity() {
                     tempFile.delete()
                 }
 
-                val updatedTrips = dbHelper.getAllTrips()
+                val updatedTrips = getCleanTrips()
                 val csvContent = java.lang.StringBuilder()
                 csvContent.append("Date,Start Time,End Time,Distance (km),Avg Speed (km/h),Max Speed (km/h),Max G-Force\n")
                 val sdfDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
@@ -335,7 +401,7 @@ class TripJournalActivity : AppCompatActivity() {
     private fun exportDatabaseToCSV() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val trips = dbHelper.getAllTrips()
+                val trips = getCleanTrips()
                 if (trips.isEmpty()) {
                     withContext(Dispatchers.Main) { Toast.makeText(this@TripJournalActivity, getString(R.string.msg_export_empty), Toast.LENGTH_SHORT).show() }
                     return@launch
@@ -371,9 +437,11 @@ class TripJournalActivity : AppCompatActivity() {
         }
     }
 
+    private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
+
     private fun loadDataAndRender() {
         lifecycleScope.launch(Dispatchers.IO) {
-            allTrips = dbHelper.getAllTrips()
+            allTrips = getCleanTrips()
             withContext(Dispatchers.Main) { renderTrips() }
         }
     }
@@ -392,14 +460,16 @@ class TripJournalActivity : AppCompatActivity() {
             return
         }
 
+        // --- ДАШБОРД (BMW Style Glass Panel) ---
         var totalOdoMeters = 0f
-        allTrips.forEach { totalOdoMeters += it.distanceMeters }
-
-        contentLayout.addView(TextView(this).apply {
-            text = "ODO: ${String.format(Locale.US, "%.1f", totalOdoMeters / 1000f)} km"
-            textSize = 26f; setTypeface(null, Typeface.BOLD); setTextColor("#E0E0E0".toColorInt())
-            textAlignment = View.TEXT_ALIGNMENT_CENTER; setPadding(0, 0, 0, 16)
-        })
+        var totalOdoTime = 0L
+        allTrips.forEach {
+            totalOdoMeters += it.distanceMeters
+            totalOdoTime += (it.endTime - it.startTime)
+        }
+        val totalOdoKm = totalOdoMeters / 1000f
+        val totalOdoHours = totalOdoTime / 3600000f
+        val totalOdoAvg = if (totalOdoHours > 0) totalOdoKm / totalOdoHours else 0f
 
         val prefs = getSharedPreferences("DashcamPrefs", MODE_PRIVATE)
         val tripBStartTime = prefs.getLong("trip_b_start", 0L)
@@ -408,40 +478,86 @@ class TripJournalActivity : AppCompatActivity() {
         val tripBHours = tripBTime / 3600000f
         val tripBAvg = if (tripBHours > 0) (tripBDist / 1000f) / tripBHours else 0f
 
-        val tripBLayout = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(0, 0, 0, 32) }
-        tripBLayout.addView(TextView(this).apply {
-            text = String.format(Locale.US, "${if (isRu) "TRIP B (Пользовательский)" else "TRIP B (Custom)"}\n%.1f km  (∅ %.1f km/h)  ", tripBDist / 1000f, tripBAvg)
-            textSize = 16f; setTypeface(null, Typeface.BOLD); textAlignment = View.TEXT_ALIGNMENT_CENTER; setTextColor("#FFB74D".toColorInt())
-        })
-        tripBLayout.addView(ImageButton(this).apply {
-            layoutParams = LinearLayout.LayoutParams(96, 96); setBackgroundColor(Color.TRANSPARENT)
-            setImageResource(android.R.drawable.ic_popup_sync); setColorFilter("#FFB74D".toColorInt())
-            setOnClickListener {
-                AlertDialog.Builder(this@TripJournalActivity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                    .setTitle(if (isRu) "Сбросить Trip B?" else "Reset Trip B?")
-                    .setMessage(if (isRu) "Пробег Trip B начнется с нуля. Общий ODO не изменится." else "Trip B will start from zero.")
-                    .setPositiveButton(if (isRu) "СБРОС" else "RESET") { _, _ -> prefs.edit { putLong("trip_b_start", System.currentTimeMillis()) }; loadDataAndRender() }
-                    .setNegativeButton(if (isRu) "Отмена" else "Cancel", null).show()
-            }
-        })
-        contentLayout.addView(tripBLayout)
-
         val filteredTrips = allTrips.filter { it.startTime in currentFilterStart..currentFilterEnd }
         var periodDist = 0f; var periodTime = 0L
         filteredTrips.forEach { periodDist += it.distanceMeters; periodTime += (it.endTime - it.startTime) }
         val periodHours = periodTime / 3600000f
         val periodAvgSpeed = if (periodHours > 0) (periodDist / 1000f) / periodHours else 0f
 
-        contentLayout.addView(TextView(this).apply {
-            text = String.format(Locale.US, "${if (isRu) "TRIP A (Суточный/Период)" else "TRIP A (Daily/Period)"}\n%.1f km  (∅ %.1f km/h)", periodDist / 1000f, periodAvgSpeed)
-            textSize = 15f; setTypeface(null, Typeface.BOLD); setTextColor("#66BB6A".toColorInt())
-            textAlignment = View.TEXT_ALIGNMENT_CENTER; setPadding(0, 0, 0, 24)
+        val dashboardCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                setColor("#1C1C1E".toColorInt())
+                cornerRadius = dpToPx(24).toFloat()
+            }
+            setPadding(dpToPx(24), dpToPx(24), dpToPx(24), dpToPx(24))
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = dpToPx(24)
+            }
+        }
+
+        // ODO Главный
+        dashboardCard.addView(TextView(this).apply {
+            text = String.format(Locale.US, "ODO: %.1f km  (∅ %.1f km/h)", totalOdoKm, totalOdoAvg)
+            textSize = 22f; setTypeface(null, Typeface.BOLD); setTextColor(Color.WHITE)
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = dpToPx(16)
+            }
         })
 
+        // Разделитель
+        dashboardCard.addView(View(this).apply {
+            background = GradientDrawable().apply { setColor("#2C2C2E".toColorInt()) }
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(1)).apply {
+                bottomMargin = dpToPx(16)
+            }
+        })
+
+        // TRIP B (Неоново-Оранжевый)
+        val tripBRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        tripBRow.addView(TextView(this).apply {
+            text = String.format(Locale.US, "${if (isRu) "TRIP B (Пользовательский)" else "TRIP B (Custom)"}\n%.1f km  (∅ %.1f km/h)", tripBDist / 1000f, tripBAvg)
+            textSize = 15f; setTypeface(null, Typeface.BOLD); textAlignment = View.TEXT_ALIGNMENT_CENTER; setTextColor("#FF9800".toColorInt())
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        tripBRow.addView(ImageButton(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dpToPx(48), dpToPx(48))
+            setBackgroundColor(Color.TRANSPARENT)
+            setImageResource(android.R.drawable.ic_popup_sync)
+            setColorFilter("#FF9800".toColorInt())
+            setOnClickListener {
+                AlertDialog.Builder(this@TripJournalActivity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle(if (isRu) "Сбросить Trip B?" else "Reset Trip B?")
+                    .setMessage(if (isRu) "Пробег Trip B начнется с нуля. Общий ODO не изменится." else "Trip B will start from zero.")
+                    .setPositiveButton(if (isRu) "СБРОС" else "RESET") { _, _ -> prefs.edit { putLong("trip_b_start", System.currentTimeMillis()) }; loadDataAndRender() }
+                    .setNegativeButton(if (isRu) "ОТМЕНА" else "CANCEL", null).show()
+            }
+        })
+        dashboardCard.addView(tripBRow)
+
+        // Разделитель 2
+        dashboardCard.addView(View(this).apply {
+            background = GradientDrawable().apply { setColor("#2C2C2E".toColorInt()) }
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(1)).apply {
+                topMargin = dpToPx(16); bottomMargin = dpToPx(16)
+            }
+        })
+
+        // TRIP A (Неоново-Зеленый)
+        dashboardCard.addView(TextView(this).apply {
+            text = String.format(Locale.US, "${if (isRu) "TRIP A (Выбранный период)" else "TRIP A (Selected Period)"}\n%.1f km  (∅ %.1f km/h)", periodDist / 1000f, periodAvgSpeed)
+            textSize = 15f; setTypeface(null, Typeface.BOLD); setTextColor("#00E676".toColorInt())
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
+        })
+
+        contentLayout.addView(dashboardCard)
+
+        // --- СПИСОК ПОЕЗДОК ---
         if (filteredTrips.isEmpty()) {
             contentLayout.addView(TextView(this).apply {
                 text = if (isRu) "В этом периоде нет поездок." else "No trips in this period."
-                textSize = 14f; setTextColor(Color.DKGRAY); textAlignment = View.TEXT_ALIGNMENT_CENTER; setPadding(0, 32, 0, 0)
+                textSize = 14f; setTextColor(Color.DKGRAY); textAlignment = View.TEXT_ALIGNMENT_CENTER; setPadding(0, dpToPx(32), 0, 0)
             })
         } else {
             val sdfDay = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()); val sdfTime = SimpleDateFormat("HH:mm", Locale.getDefault())
@@ -451,39 +567,64 @@ class TripJournalActivity : AppCompatActivity() {
                 val dayDistKm = dayDist / 1000f; val dayHours = dayTime / 3600000f
                 val dayAvgSpeed = if (dayHours > 0) dayDistKm / dayHours else 0f
 
-                val card = CardView(this).apply { setCardBackgroundColor("#1E1E1E".toColorInt()); radius = 24f; setContentPadding(40, 40, 40, 40); useCompatPadding = true }
-                val cardLayout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                // Карточка дня (Liquid Glass Style)
+                val cardLayout = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    background = GradientDrawable().apply {
+                        setColor("#1C1C1E".toColorInt())
+                        cornerRadius = dpToPx(20).toFloat()
+                    }
+                    setPadding(dpToPx(20), dpToPx(20), dpToPx(20), dpToPx(20))
+                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                        bottomMargin = dpToPx(16)
+                    }
+                }
+
                 cardLayout.addView(TextView(this).apply {
                     text = "📅 $dayString\n⏱ ${dayTime / 3600000}h ${(dayTime % 3600000) / 60000}m  |  🚗 ${String.format(Locale.US, "%.1f", dayDistKm)} km  |  ∅ ${String.format(Locale.US, "%.1f", dayAvgSpeed)} km/h"
                     setTextColor(Color.WHITE); textSize = 15f; setTypeface(null, Typeface.BOLD)
                 })
 
-                val detailsLayout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE; setPadding(0, 32, 0, 0) }
+                val detailsLayout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE; setPadding(0, dpToPx(16), 0, 0) }
                 dayTrips.forEach { t ->
                     detailsLayout.addView(TextView(this).apply {
                         text = "🔹 ${sdfTime.format(Date(t.startTime))} - ${sdfTime.format(Date(t.endTime))}  |  ${String.format(Locale.US, "%.1f", t.distanceMeters / 1000f)} km\n     Max: ${t.maxSpeedKmh.toInt()} km/h  |  Max G: ${String.format(Locale.US, "%.2f", t.maxGForce)}"
-                        setTextColor(Color.LTGRAY); textSize = 14f; setPadding(0, 16, 0, 16)
+                        setTextColor("#B3B3B3".toColorInt()); textSize = 14f; setPadding(0, dpToPx(8), 0, dpToPx(8))
                     })
                 }
                 cardLayout.addView(detailsLayout)
-                card.addView(cardLayout)
-                card.setOnClickListener { detailsLayout.isVisible = !detailsLayout.isVisible }
-                contentLayout.addView(card)
+
+                cardLayout.setOnClickListener { detailsLayout.isVisible = !detailsLayout.isVisible }
+                contentLayout.addView(cardLayout)
             }
         }
         renderFactoryResetButton()
     }
 
     private fun renderFactoryResetButton() {
-        contentLayout.addView(Button(this).apply {
-            text = if (isRu) "ПОЛНЫЙ СБРОС (FACTORY RESET)" else "FACTORY RESET ODO"
-            setTextColor(Color.RED); setBackgroundColor(Color.TRANSPARENT)
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 96, 0, 48) }
+        val btnContainer = LinearLayout(this).apply {
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(0, dpToPx(48), 0, dpToPx(24))
+            }
+        }
+
+        btnContainer.addView(Button(this).apply {
+            text = if (isRu) "СБРОС БАЗЫ ДАННЫХ (FACTORY RESET)" else "FACTORY RESET ODO"
+            setTextColor("#FF5252".toColorInt())
+            textSize = 12f
+            setTypeface(null, Typeface.BOLD)
+            background = GradientDrawable().apply {
+                setColor("#2A1212".toColorInt()) // Темно-красный фон
+                cornerRadius = dpToPx(16).toFloat()
+            }
+            setPadding(dpToPx(32), dpToPx(16), dpToPx(32), dpToPx(16))
+
             setOnClickListener {
                 AlertDialog.Builder(this@TripJournalActivity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                     .setTitle(if (isRu) "ВНИМАНИЕ" else "WARNING")
-                    .setMessage(if (isRu) "Удалить всю базу данных?" else "Wipe the entire database?")
-                    .setPositiveButton(if (isRu) "ДА" else "YES") { _, _ ->
+                    .setMessage(if (isRu) "Удалить всю базу данных и пробег?" else "Wipe the entire database?")
+                    .setPositiveButton(if (isRu) "УДАЛИТЬ" else "WIPE") { _, _ ->
                         dbHelper.clearAllTrips(); getSharedPreferences("DashcamPrefs", MODE_PRIVATE).edit { putLong("trip_b_start", 0L) }
                         Toast.makeText(context, "Database wiped", Toast.LENGTH_SHORT).show()
                         loadDataAndRender()
@@ -491,5 +632,7 @@ class TripJournalActivity : AppCompatActivity() {
                     .setNegativeButton(if (isRu) "ОТМЕНА" else "CANCEL", null).show()
             }
         })
+
+        contentLayout.addView(btnContainer)
     }
 }
